@@ -180,7 +180,7 @@ export type AreaDef = {
   arrive?: { x: number; y: number };
   // Areas built from the project's own 3D maps: the converted map's name, and the grid's offset in it.
   // `mountains` lists wall tiles the 3D view draws as real mountains.
-  map3d?: { name: string; x0: number; y0: number; mountains?: string[]; pitch?: number; distance?: number; cutZ?: number; summer?: boolean };
+  map3d?: { name: string; x0: number; y0: number; mountains?: string[]; pitch?: number; distance?: number; cutZ?: number; summer?: boolean; doors?: string[] };
   // Things standing in the area that the map data places rather than the rows.
   extra?: (Spec & { x: number; y: number })[];
   // Parts of a big map with a name of their own, and whether they are buildings (Ricky waits outside those).
@@ -265,7 +265,8 @@ const cavesRule = (e: GridEntity): Spec | null => {
     case "Golem":
       return { kind: "enemy", what: "golem" };
     case "Secret Master":
-      return npc("master");
+      // In the caves he stands in the room that opens to the east, looking out at whoever comes in.
+      return { ...npc("master"), face: "right" };
     case "Steven":
       return npc("stefan");
     case "Joshua":
@@ -308,7 +309,8 @@ const templeRule = (e: GridEntity): Spec | null => {
     case "Drawf_Dialogue":
       return npc("drawf");
     case "Secret Master":
-      return npc("master");
+      // In his hideout he faces the secret passage, where visitors come in.
+      return { ...npc("master"), face: "right" };
     case "table":
       return prop("table");
     case "door":
@@ -420,7 +422,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     rows: templeGrid.rows,
     sym: {},
     arrive: { x: 36, y: 32 },
-    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"] },
+    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"], doors: [`${13 + templeGrid.x0},${13 + templeGrid.y0}`] },
     zones: [
       { id: "falls", name: "Behind the Falls", rect: [32, 1, 34, 2] },
       { id: "hideout", name: "The Secret Master's Hideout", rect: [1, 9, 8, 17] },
@@ -445,7 +447,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
       ...bind(slimesGrid, (e) => (e.m === "Statue" ? prop("statue") : e.m === "Vastios" ? npc("vastios") : null)),
       // The Secret Master stands by the road in, with a hint. The way to his treehouse is a certain tile, off in
       // the far southeast corner of the fields: step on it and the ground carries you there.
-      { x: 21, y: 28, ...npc("master") },
+      { x: 21, y: 28, ...npc("master"), face: "left" },
       { x: 31, y: 30, ...exit("treehouse", 5, 5, "tree_tele") },
     ],
   },

@@ -310,6 +310,9 @@ export class Stage {
   private shakes = new Map<Actor, number>();
   private scrub = new Map<string, { actors: Actor[]; now: number; want: number }>();
   private scenery = new Map<string, Actor>();
+  // Blocks that make up a door in the mountain, by the door's cell, and which of them have been told to open.
+  private doors = new Map<string, Actor[]>();
+  private doorsSeen = new Set<string>();
   // The floor's pressure plates, by "model@x,y".
   private plates = new Map<string, Actor>();
   // Where the window in the boulder goes: the hero's place on the screen, in pixels, and how wide.
@@ -365,11 +368,14 @@ export class Stage {
 
   // `mountains` names the wall tiles to draw as real mountains instead of blocks.
   // `cutZ` drops every tile from that height up (the caves' ceilings), so the rooms can be seen into.
-  async loadMap(name: string, mountains: string[] = [], cutZ = Infinity): Promise<MapData> {
+  // `doors` are cells ("x,y" in the map's own tile numbers) where the mountain's blocks are a door that can open (the secret rock in the valley wall).
+  async loadMap(name: string, mountains: string[] = [], cutZ = Infinity, doors: string[] = []): Promise<MapData> {
     const map = (await (await fetch(`${import.meta.env.BASE_URL}mereddia/3d/maps/${slug(name)}.json`)).json()) as MapData;
     this.root.clear();
     this.actors.length = 0;
     this.scenery.clear();
+    this.doors.clear();
+    this.doorsSeen.clear();
     this.plates.clear();
     this.live.clear();
     this.high = [];
@@ -387,7 +393,16 @@ export class Stage {
     const byModel = new Map<string, Placed[]>();
     // Tiles above the first storey are kept apart, so they can be hidden when the hero goes indoors.
     const upper = (t: Placed) => t.z >= 17;
-    for (const t of map.tiles) if (!mountains.includes(t.m) && t.z < cutZ && !(name === "Caves" && t.m === "carpet")) (byModel.get(`${t.m}|${upper(t) ? 1 : 0}`) ?? byModel.set(`${t.m}|${upper(t) ? 1 : 0}`, []).get(`${t.m}|${upper(t) ? 1 : 0}`)!).push(t);
+    // The pieces round the secret door are the project's dark cobble, repainted to the mountain's grey so they sit in the wall.
+    const doorCells = new Set(doors);
+    const doorBlocks: Placed[] = [];
+    for (const t of map.tiles) {
+      if (mountains.includes(t.m) && doorCells.has(`${t.x},${t.y}`) && t.m === "Wall3") doorBlocks.push(t);
+      if (mountains.includes(t.m) || t.z >= cutZ || (name === "Caves" && t.m === "carpet")) continue;
+      const m = name === "The Temple" && /^(Wall6|wall7|wall8)$/.test(t.m) ? `${t.m}~rock` : t.m;
+      const k = `${m}|${upper(t) ? 1 : 0}`;
+      (byModel.get(k) ?? byModel.set(k, []).get(k)!).push(t);
+    }
     if (mountains.length) this.root.add(buildMountains(map, mountains, this.material));
     await Promise.all(
       [...byModel].map(async ([key, list]) => {
@@ -434,6 +449,20 @@ export class Stage {
         }
       }),
     );
+    // The door itself: the stack of blocks in the valley wall, in grey rock, each with the project's own opening animation.
+    if (doorBlocks.length) {
+      const dm = await loadModel("tiles", "Wall3~rock");
+      if (dm) {
+        for (const t of doorBlocks) {
+          const a = new Actor(dm, this.see(dm.material, 0.45));
+          a.mesh.applyMatrix4(matrixOf(t.t!));
+          this.root.add(a.mesh);
+          this.actors.push(a);
+          const k = `${t.x},${t.y}`;
+          (this.doors.get(k) ?? this.doors.set(k, []).get(k)!).push(a);
+        }
+      }
+    }
     await Promise.all(
       [...map.objects.map((o) => ["objects", o] as const), ...map.characters.map((c) => ["characters", c] as const)].map(async ([kind, p]) => {
         if (p.hidden) return;
@@ -624,6 +653,27 @@ export class Stage {
   shudder(key: string) {
     const a = this.scenery.get(key);
     if (a) this.shakes.set(a, 0);
+  }
+
+  // A door in the mountain (by its cell): once told it is open, its blocks play their opening animation and are gone. A door that is already open when the
+  // area is entered is simply not there.
+  private doorsOpened = new Set<string>();
+  setDoor(cell: string, open: boolean) {
+    const list = this.doors.get(cell);
+    if (!list) return;
+    const first = !this.doorsSeen.has(cell);
+    this.doorsSeen.add(cell);
+    if (!open) return;
+    if (first) {
+      for (const a of list) a.mesh.visible = false;
+      return;
+    }
+    if (this.doorsOpened.has(cell)) return;
+    this.doorsOpened.add(cell);
+    for (const a of list) a.play("Open");
+    window.setTimeout(() => {
+      for (const a of list) a.mesh.visible = false;
+    }, 1300);
   }
 
   // Take the roof off: upper walls and roofs vanish while the hero is inside a building.

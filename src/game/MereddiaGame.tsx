@@ -42,7 +42,7 @@ import * as audio from "./audio";
 import { cuesFor, loopsFor } from "./cues";
 import { MiniMap, resetSeen } from "./MiniMap";
 import { CUTSCENES, type Aim, type Step } from "./cutscenes";
-import { withNewThings, act, attackOf, boulderTile, COMBO_MAX, DODGE_COST, type Intent, defenseOf, groundAt, isState, maxHp, maxMana, newGame, potionCap, slimesLeft, STAMINA_MAX, xpToNext, type Action, type Dir, type State } from "./engine";
+import { STASH_KEYS, type StashKey, withNewThings, act, attackOf, boulderTile, COMBO_MAX, DODGE_COST, type Intent, defenseOf, groundAt, isState, maxHp, maxMana, newGame, potionCap, slimesLeft, STAMINA_MAX, xpToNext, type Action, type Dir, type State } from "./engine";
 import { NAMES, NODES, type Who } from "./story";
 import { carried } from "./inventory";
 import { ELEMENT_COLOR } from "./art";
@@ -237,6 +237,7 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
   const slabSeen = useRef(new Map<string, number>());
   const opening = useRef(new Set<string>());
   const chestsLifted = useRef(new Set<string>());
+  const ricky = useRef<boolean | undefined>(undefined);
   const [over, setOver] = useState<Over>(CLEAR);
   const skip = useRef<() => void>(() => {});
 
@@ -270,7 +271,7 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
     });
     if (cur.area === "finale") for (const c of FINALE_CAST) list.push({ key: `cast:${c.who}`, kind: "characters", name: c.name, ...world(c.x, c.y, d.x0, d.y0), rotY: c.rotY, scale: CHARACTER_SCALE, ...(c.anim ? { anim: c.anim } : {}) });
     if (cur.companion === "horse" && cur.horse?.at && !AREAS[cur.area].indoor) list.push({ key: "horse", kind: "characters", name: `Horse~${cur.horse.coat}`, ...world(cur.horse.at.x, cur.horse.at.y, d.x0, d.y0), rotY: ROT[cur.horse.face], scale: HORSE_SCALE, xray: true });
-    if (cur.ricky && cur.companion === "ricky" && !AREAS[cur.area].indoor) list.push({ key: "ricky", kind: "characters", name: "rikycharacter1", ...world(cur.ricky.x, cur.ricky.y, d.x0, d.y0), rotY: 0, scale: CHARACTER_SCALE });
+    if (cur.ricky && cur.companion === "ricky" && !AREAS[cur.area].indoor) list.push({ key: "ricky", kind: "characters", name: "rikycharcter2", ...world(cur.ricky.x, cur.ricky.y, d.x0, d.y0), rotY: 0, scale: CHARACTER_SCALE, ...(cur.rickyAct ? { shot: { name: "Open", n: cur.rickyAct } } : {}) });
     // The pigeon: on the old tree's branch until it's felled, then on Mallakoth's head if it chose to stay.
     const tree = cur.entities.find((e) => e.area === cur.area && e.kind === "prop" && e.what === "tree");
     // The four flame pillars the golem's waking lights (the project puts them on the tiles named torch1 to torch4) stay for the whole fight, and
@@ -369,6 +370,8 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
     for (const b of bound(cur.area)) if (b.dynamic || !present.has(b.id)) for (const k of b.src.split("|")) if (!opening.current.has(k)) hide.add(k);
     // The rock the pickaxe was in crumbles to rubble once it has been struck down.
     if (cur.area === "caves" && cur.items.pickaxe && !cur.entities.some((e) => e.what === "rock" || e.what === "pickrock")) st.playScenery(["boulder@-3,8"], "break");
+    // The secret rock in the valley wall opens when the mountain-coloured button has been pressed.
+    for (const cell of AREAS[cur.area].map3d?.doors ?? []) st.setDoor(cell, !!cur.flags.secretOpen);
     // A chest that has been opened lifts its lid, once.
     for (const e of cur.entities) if (e.area === cur.area && e.kind === "chest" && e.done && e.src && !chestsLifted.current.has(e.id)) { chestsLifted.current.add(e.id); st.playScenery(e.src.split("|"), "open"); }
     // The plate he stands on sinks.
@@ -393,7 +396,19 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
     if (cur.items.axe) hide.add("axe@-2,-1");
     // The boulder is drawn from the rules, wherever it is; the one the map placed always goes.
     hide.add("Boulder@-29,6");
-    if (cur.companion === "ricky") hide.add("rikycharacter1@-19,-9");
+    // Ricky in the hideout wakes up (the project's "Awaken") when the Secret Master gives him to you, then goes with you.
+    const rickyKey = "rikycharacter1@-19,-9";
+    const owned = !!cur.flags.rickyOwned;
+    if (owned && ricky.current === false && cur.area === "temple") {
+      st.playScenery([rickyKey], "Awaken");
+      opening.current.add(rickyKey);
+      setTimeout(() => {
+        opening.current.delete(rickyKey);
+        void apply();
+      }, 1100);
+    }
+    ricky.current = owned;
+    if (owned && !opening.current.has(rickyKey)) hide.add(rickyKey);
     st.setHidden(hide);
     // The spikes rise as the trap's timer runs out, and stay up once it has done its work.
     if (cur.area === "spikes") st.setTileFrame("wooden_floor_with_trap", cur.mode === "lost" ? 1 : cur.spike ? 1 - cur.spike.left / cur.spike.total : 0);
@@ -440,7 +455,7 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
       }
       made.distance = m3.distance ?? DEF_DIST;
       made.summer = !!m3.summer;
-      await made.loadMap(m3.name, m3.mountains, m3.cutZ);
+      await made.loadMap(m3.name, m3.mountains, m3.cutZ, m3.doors);
       if (!alive) return;
       await apply();
       const { world } = await import("./three/bind");
@@ -764,22 +779,91 @@ function Inventory({ s, dispatch, open, onOpenChange }: { s: State; dispatch: (a
               </ul>
             </section>
           )}
-          {s.companion === "ricky" && (
-            <section aria-label="Companion">
-              <h3 className="mb-1.5 font-display text-heading">Companion</h3>
-              <ul className="flex flex-col gap-1.5">
-                <Row icon={<Ricky className="size-7" />} name="Ricky the Chest" text="Follows you everywhere except into buildings, and carries your spare potions (the pack holds up to 10)." />
-              </ul>
-            </section>
-          )}
-          {s.companion === "horse" && s.horse && (
-            <section aria-label="Companion">
-              <h3 className="mb-1.5 font-display text-heading">Companion</h3>
-              <ul className="flex flex-col gap-1.5">
-                <Row icon={<SparkleIcon size={24} weight="fill" />} name={`${s.horse.name} · ${COATS[s.horse.coat]?.name ?? "Bay"} horse`} text="Quicker than walking. Follows you outdoors (not into buildings) and now and then kicks what comes for you." />
-              </ul>
-            </section>
-          )}
+          <section aria-label="Companion slot">
+            <h3 className="mb-1.5 font-display text-heading">Companion slot</h3>
+            <ul className="flex flex-col gap-1.5">
+              {!s.flags.rickyOwned && !s.horse && <Row icon={<SparkleIcon size={24} />} name="Empty" text="Somebody out there might lend you a friend, or sell you one." />}
+              {s.flags.rickyOwned && (
+                <Row
+                  icon={<Ricky className="size-7" />}
+                  name="Ricky the Chest"
+                  text={s.companion === "ricky" ? (s.ricky ? "Follows you everywhere except into buildings. Face him and press the action key to open his chest." : "Waiting outside; he gets shy of buildings.") : "Stores items in his mouth, and keeps them wherever you go."}
+                  right={
+                    <span className="flex gap-1.5">
+                      {s.companion === "ricky" && (
+                        <Button size="sm" variant="secondary" disabled={!calm || !s.ricky} onClick={() => { dispatch({ type: "openRicky" }); onOpenChange(false); }}>
+                          Open
+                        </Button>
+                      )}
+                      <Button size="sm" variant={s.companion === "ricky" ? "default" : "secondary"} disabled={!calm} onClick={() => dispatch({ type: "companion", who: s.companion === "ricky" ? "none" : "ricky" })}>
+                        {s.companion === "ricky" ? "Put away" : "Equip"}
+                      </Button>
+                    </span>
+                  }
+                />
+              )}
+              {s.horse && (
+                <Row
+                  icon={<SparkleIcon size={24} weight="fill" />}
+                  name={`${s.horse.name} · ${COATS[s.horse.coat]?.name ?? "Bay"} horse`}
+                  text="Quicker than walking. Follows you outdoors (not into buildings) and now and then kicks what comes for you."
+                  right={
+                    <Button size="sm" variant={s.companion === "horse" ? "default" : "secondary"} disabled={!calm} onClick={() => dispatch({ type: "companion", who: s.companion === "horse" ? "none" : "horse" })}>
+                      {s.companion === "horse" ? "Put away" : "Equip"}
+                    </Button>
+                  }
+                />
+              )}
+            </ul>
+          </section>
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+// Ricky's chest: what is in the pack and what is in his mouth, and buttons to move things between them. He keeps his on every map.
+const STASH_LABEL: Record<StashKey, string> = { gold: "Gold", potions: "Potions", keys: "Keys", wood: "Wood", stone: "Stone" };
+function RickyChest({ s, dispatch, open, onOpenChange }: { s: State; dispatch: (a: Action) => void; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const pack = (k: StashKey) => (k === "wood" || k === "stone" ? s[k] ?? 0 : s[k]);
+  return (
+    <Drawer open={open && s.companion === "ricky"} onOpenChange={onOpenChange}>
+      <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[85dvh]">
+        <DrawerHeader className="text-left">
+          <DrawerTitle>Ricky the Chest</DrawerTitle>
+          <DrawerDescription>What is in his mouth stays with him, wherever you go.</DrawerDescription>
+        </DrawerHeader>
+        <div className="flex flex-col gap-2 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+16px)]">
+          <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 px-3 text-caption text-muted-foreground">
+            <span />
+            <span className="w-14 text-center">Pack</span>
+            <span className="w-14 text-center">Ricky</span>
+          </div>
+          <ul className="flex flex-col gap-1.5">
+            {STASH_KEYS.map((k) => (
+              <li key={k} className="rounded-lg bg-card px-3 py-2">
+                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3">
+                  <span className="text-footnote font-medium">{STASH_LABEL[k]}</span>
+                  <span className="w-14 text-center tabular-nums">{pack(k)}</span>
+                  <span className="w-14 text-center tabular-nums">{s.bag?.[k] ?? 0}</span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="secondary" disabled={!pack(k)} aria-label={`Put one ${STASH_LABEL[k]} in Ricky`} onClick={() => dispatch({ type: "stash", what: k, n: 1 })}>
+                    Store 1
+                  </Button>
+                  <Button size="sm" variant="secondary" disabled={!pack(k)} aria-label={`Put all your ${STASH_LABEL[k]} in Ricky`} onClick={() => dispatch({ type: "stash", what: k, n: pack(k) })}>
+                    Store all
+                  </Button>
+                  <Button size="sm" variant="secondary" disabled={!s.bag?.[k] || (k === "potions" && s.potions >= potionCap(s))} aria-label={`Take one ${STASH_LABEL[k]} out of Ricky`} onClick={() => dispatch({ type: "stash", what: k, n: -1 })}>
+                    Take 1
+                  </Button>
+                  <Button size="sm" variant="secondary" disabled={!s.bag?.[k] || (k === "potions" && s.potions >= potionCap(s))} aria-label={`Take all the ${STASH_LABEL[k]} out of Ricky`} onClick={() => dispatch({ type: "stash", what: k, n: -(s.bag?.[k] ?? 0) })}>
+                    Take all
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </DrawerContent>
     </Drawer>
@@ -1152,6 +1236,15 @@ export function MereddiaGame() {
   const [state, setState] = useState<State>(load);
   const [sprint, setSprint] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
+  // Ricky's chest opens when something in the game asks for it (walking into him), and from the backpack.
+  const [chestOpen, setChestOpen] = useState(false);
+  const lastUi = useRef(state.ui?.n ?? 0);
+  useEffect(() => {
+    if (state.ui && state.ui.n !== lastUi.current) {
+      lastUi.current = state.ui.n;
+      setChestOpen(true);
+    }
+  }, [state.ui]);
   const latest = useRef(state);
   const cues = useCues();
   useGameAudio(state);
@@ -1381,6 +1474,7 @@ export function MereddiaGame() {
         </p>
         <div className="flex items-center">
           <Inventory s={s} dispatch={dispatch} open={invOpen} onOpenChange={setInvOpen} />
+          <RickyChest s={s} dispatch={dispatch} open={chestOpen} onOpenChange={setChestOpen} />
           <Journal s={s} />
           <AlertDialog>
             <AlertDialogTrigger asChild>

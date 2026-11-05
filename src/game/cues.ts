@@ -75,7 +75,8 @@ export function cuesFor(prev: State, next: State): Cue[] {
   if (flagged(prev, next, "treeFelled")) add("chest", 200);
   if (next.items.axe && !prev.items.axe) add("axe");
   if (next.items.pickaxe && !prev.items.pickaxe) add("pickaxe_fixed");
-  if (next.companion && !prev.companion) add("Ricky_Spawn");
+  if (next.companion === "ricky" && prev.companion !== "ricky") add("Ricky_Spawn");
+  if (prev.companion === "ricky" && next.companion !== "ricky") add("Ricky_Despawn");
   if (next.dlg?.node === "intro2" && prev.dlg?.node !== "intro2") add("Letter");
   if (next.dlg?.node === "tree_tele" && prev.dlg?.node !== "tree_tele") add("Magic_Crystal");
 

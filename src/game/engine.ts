@@ -60,6 +60,12 @@ export type Action =
   | { type: "dash" }
   | { type: "wait" }
   | { type: "equip"; weapon: WeaponId }
+  // The companion slot: who follows him (the project's "Ricky_equip" and "Ricky_Unequip" scripts), or nobody.
+  | { type: "companion"; who: "ricky" | "horse" | "none" }
+  // Ricky's chest: put something into his mouth (n > 0) or take it out again (n < 0).
+  | { type: "stash"; what: StashKey; n: number }
+  // Open Ricky's chest from the inventory, when he is beside you.
+  | { type: "openRicky" }
   | { type: "retry" }
   | { type: "continue" }
   // Swing the axe at whatever is in front (the E key, or the Swing button).
@@ -124,6 +130,11 @@ export type State = {
   companion?: "ricky" | "horse";
   ricky?: { x: number; y: number };
   horse?: { name: string; coat: string; at?: { x: number; y: number }; face: Dir };
+  // What is in Ricky's mouth. It stays with him wherever he goes, so it is the same chest on every map.
+  bag?: Partial<Record<StashKey, number>>;
+  // The screen the view should open (Ricky's chest), counted so a second bump opens it again; and how many times he has opened his mouth, for his animation.
+  ui?: { open: "ricky"; n: number };
+  rickyAct?: number;
   // The coat chosen for a horse being bought, until it has a name and is paid for.
   horseDraft?: string;
   entities: Entity[];
@@ -179,6 +190,14 @@ const gainPotions = (s: State, n: number) => {
   s.potions = Math.max(s.potions, Math.min(potionCap(s), s.potions + n));
 };
 export const HORSE_PRICE = 5;
+
+// What Ricky's mouth can hold: the things the pack counts. (The tools, the blade and the keepsake stay with Mallakoth.)
+export type StashKey = "gold" | "potions" | "keys" | "wood" | "stone";
+export const STASH_KEYS: StashKey[] = ["gold", "potions", "keys", "wood", "stone"];
+const packOf = (s: State, k: StashKey) => (k === "wood" || k === "stone" ? s[k] ?? 0 : s[k]);
+const setPack = (s: State, k: StashKey, v: number) => {
+  s[k] = v;
+};
 
 // Whoever follows him comes to stand where he was.
 function follow(s: State, from: { x: number; y: number } | undefined, toward?: { x: number; y: number }) {
@@ -335,6 +354,13 @@ export function act(prev: State, a: Action): State {
     tick(s);
     return s;
   }
+  if (a.type === "companion") return setCompanion(s, a.who);
+  if (a.type === "stash") return stash(s, a.what, a.n);
+  if (a.type === "openRicky") {
+    if (s.companion === "ricky" && s.ricky) openRicky(s);
+    else say(s, s.companion === "ricky" ? "Ricky is waiting outside; he gets shy of buildings." : "Ricky is not with you. Put him in your companion slot.");
+    return s;
+  }
   if (a.type === "equip" && s.weapons.includes(a.weapon)) {
     s.weapon = a.weapon;
     say(s, `You ready the ${WEAPONS[a.weapon].name}.`);
@@ -399,6 +425,62 @@ export function show(s: State, id: string, ref?: string, text?: string) {
   if (scene) cue(s, scene);
   s.mode = "dialogue";
   s.dlg = { node: id, ref, ...(text !== undefined ? { text } : {}) };
+}
+
+// Ricky's chest opens: his mouth swings wide (his own "Open" animation) and the view shows what is in him and in the pack.
+function openRicky(s: State) {
+  s.ui = { open: "ricky", n: (s.ui?.n ?? 0) + 1 };
+  s.rickyAct = (s.rickyAct ?? 0) + 1;
+}
+
+// Puts something into Ricky's mouth, or takes it out. Taking potions out stops at what the pack holds.
+function stash(s: State, what: StashKey, n: number): State {
+  if (!STASH_KEYS.includes(what) || !Number.isFinite(n) || n === 0 || s.companion !== "ricky") return s;
+  const bag = (s.bag ??= {});
+  const inBag = bag[what] ?? 0;
+  const have = packOf(s, what);
+  const amount = n > 0 ? Math.min(Math.floor(n), have) : -Math.min(Math.floor(-n), inBag);
+  const room = what === "potions" && amount < 0 ? Math.max(0, potionCap(s) - s.potions) : Infinity;
+  const moved = amount < 0 ? -Math.min(-amount, room) : amount;
+  if (moved === 0) return s;
+  setPack(s, what, have - moved);
+  bag[what] = inBag + moved;
+  if (bag[what] === 0) delete bag[what];
+  return s;
+}
+
+// The companion slot. Switching puts the old one away and the new one at his feet (as the project's Ricky_equip does: on the tile in front of him),
+// never inside a building.
+function setCompanion(s: State, who: "ricky" | "horse" | "none"): State {
+  const was = s.companion;
+  if (who === "none") {
+    if (!was) return s;
+    s.companion = undefined;
+    delete s.ricky;
+    if (s.horse) delete s.horse.at;
+    say(s, was === "ricky" ? "Ricky despawns." : `${s.horse?.name ?? "The horse"} wanders off to graze.`);
+    return s;
+  }
+  if (was === who) return s;
+  if (who === "ricky" && !s.flags.rickyOwned) return (say(s, "You do not have Ricky."), s);
+  if (who === "horse" && !s.horse) return (say(s, "You do not have a horse."), s);
+  if (isIndoor(s.area, s.pos.x, s.pos.y)) return (say(s, who === "ricky" ? "You cannot spawn Ricky inside a building." : "You cannot call a horse inside a building."), s);
+  const [dx, dy] = STEP[s.facing];
+  const fx = s.pos.x + dx;
+  const fy = s.pos.y + dy;
+  const spot = passable(s, fx, fy) && !at(s, fx, fy).some(solid) ? { x: fx, y: fy } : { ...s.pos };
+  delete s.ricky;
+  if (s.horse) delete s.horse.at;
+  s.companion = who;
+  if (who === "ricky") {
+    s.ricky = spot;
+    say(s, "Ricky has successfully spawned in.");
+  } else if (s.horse) {
+    s.horse.at = spot;
+    s.horse.face = s.facing;
+    say(s, `${s.horse.name} trots up.`);
+  }
+  return s;
 }
 
 function end(s: State) {
@@ -559,9 +641,12 @@ function runFx(s: State, fx: string, ref?: string, text?: string) {
       s.flags.rickyNo = true;
       break;
     case "giveRicky":
-      s.companion = "ricky";
+      // "Equip Ricky in your companion slot so that he follows you around." The slot is free, so he takes it.
       s.flags.rickyOwned = true;
-      s.ricky = { ...s.pos };
+      if (!s.companion) {
+        s.companion = "ricky";
+        s.ricky = { ...s.pos };
+      }
       break;
     case "horseCoat":
       // The coat picked for the horse being bought.
@@ -573,6 +658,7 @@ function runFx(s: State, fx: string, ref?: string, text?: string) {
       s.gold = Math.max(0, s.gold - HORSE_PRICE);
       s.horse = { name, coat: s.horseDraft && COATS[s.horseDraft] ? s.horseDraft : "bay", face: "down" };
       delete s.horseDraft;
+      // The one slot goes to the horse. Ricky is put away with what is in his mouth, and can be called back from the backpack.
       if (s.companion === "ricky") delete s.ricky;
       s.companion = "horse";
       s.horse.at = { ...s.pos };
@@ -1046,8 +1132,13 @@ function chopTree(s: State, e: Entity): boolean {
 }
 
 // E: swing the axe at whatever is in front. Only the old tree cares; everything else just feels the breeze.
+// (Walking into Ricky just swaps places with him, so he never blocks a corridor; the action key, facing him, opens his chest.)
 function swing(s: State): State {
   const [dx, dy] = STEP[s.facing];
+  if (s.companion === "ricky" && s.ricky && s.ricky.x === s.pos.x + dx && s.ricky.y === s.pos.y + dy) {
+    openRicky(s);
+    return s;
+  }
   const front = at(s, s.pos.x + dx, s.pos.y + dy);
   // The golem is not to be smacked bare-handed: say so; with the pickaxe, the blow is the same one walking into it makes.
   const golem = front.find((e) => e.kind === "enemy" && e.what === "golem");

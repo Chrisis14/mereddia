@@ -144,7 +144,15 @@ function swapsFor(base: string, look: string): Map<number, [number, number, numb
   return swaps;
 }
 
-async function repainted(url: string, swaps: Map<number, [number, number, number]>): Promise<THREE.Texture> {
+// The secret door in the valley wall is drawn in the project's dark cobble, but the valley's mountains are drawn in lighter, lumpy grey rock. A tile asked for
+// "~rock" keeps its cobble's light and dark but takes the mountain's grey, so the door is part of the wall until it opens.
+const ROCK = hex("#7a777e");
+const rockOf = (r: number, g: number, b: number): [number, number, number] => {
+  const k = Math.max(0.6, Math.min(1.45, (r + g + b) / 3 / 62));
+  return [Math.min(255, Math.round(ROCK[0] * k)), Math.min(255, Math.round(ROCK[1] * k)), Math.min(255, Math.round(ROCK[2] * k))];
+};
+
+async function repainted(url: string, swaps: Map<number, [number, number, number]> | ((r: number, g: number, b: number) => [number, number, number])): Promise<THREE.Texture> {
   const bmp = await createImageBitmap(await (await fetch(url)).blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
   const cv = document.createElement("canvas");
   cv.width = bmp.width;
@@ -155,7 +163,7 @@ async function repainted(url: string, swaps: Map<number, [number, number, number
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     if (d[i + 3] !== 255) continue;
-    const to = swaps.get((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+    const to = typeof swaps === "function" ? (d[i] + d[i + 1] + d[i + 2] === 0 ? undefined : swaps(d[i], d[i + 1], d[i + 2])) : swaps.get((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
     if (to) [d[i], d[i + 1], d[i + 2]] = to;
   }
   g.putImageData(img, 0, 0);
@@ -216,7 +224,7 @@ export function loadModel(kind: string, name: string): Promise<Model | null> {
         const [fileName, look] = name.split("~");
         const dir = `${BASE}/models/${kind}/${slug(fileName)}`;
         const [json, bin] = await Promise.all([fetch(`${dir}.json`).then((r) => r.json() as Promise<Raw>), fetch(`${dir}.bin`).then((r) => r.arrayBuffer())]);
-        const swaps = look ? swapsFor(fileName, look) : null;
+        const swaps = look === "rock" && kind === "tiles" ? rockOf : look ? swapsFor(fileName, look) : null;
         let map = json.texture ? (swaps ? await repainted(`${dir}.png`, swaps) : await textureOf(`${dir}.png`)) : undefined;
         // People who wear the flame and move about have it flicker; slimes and the like do not.
         let flame: Flame | undefined;

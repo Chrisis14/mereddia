@@ -244,7 +244,7 @@ export const NODES: Record<string, Node> = {
     ],
   },
   sm_h_give: say("master", "Ricky, wake up!", "sm_h_give2", { fx: "giveRicky" }),
-  sm_h_give2: say("narrator", "A chest on little wooden legs creaks awake, stretches, and bounces over to stand beside you. Ricky the Chest will carry your potions, and follow you everywhere. Except into buildings; he gets shy."),
+  sm_h_give2: say("narrator", "A chest on little wooden legs creaks awake, stretches, and bounces over to stand beside you. Ricky the Chest will carry your potions, and follow you everywhere. Except into buildings; he gets shy. Face him and press the action key to open his chest and leave things in his mouth: he keeps them wherever you go. You can put him away, or call him back, from your backpack."),
   sm_h_no: say("master", "Your loss."),
   sm_h_out: say("narrator", "You walk away from the conversation, but you feel you are missing something."),
   sm_ret1: say("master", "Welcome back, adventurer. I have a prize for you this time.", "sm_ret2"),
