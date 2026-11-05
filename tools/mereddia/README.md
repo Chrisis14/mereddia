@@ -80,3 +80,5 @@ objects: curtain walls with corner and gate towers, a church and plaza in the mi
 paddock outside the south gate. It writes `public/mereddia/3d/maps/Dresden.json` and `src/game/maps/Dresden.grid.ts` (the walkable rows, the buildings that
 count as indoors, and named spots where people stand; `town.ts` says who stands at which). The horse is the project's `characters/Horse`, split into body and legs
 when it loads so the legs can swing; its colours and the townspeople's clothes are repainted palettes (`looks.ts`, `three/models.ts`).
+
+The followers (Ricky and the horse) trail the hero by three steps.
