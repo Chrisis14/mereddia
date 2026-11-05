@@ -4,8 +4,8 @@ import type { State } from "./engine";
 // speaks, what they say, where it goes next (or what the player can answer), and may run an effect
 // when it's shown. The state only remembers the node's id, so a half-finished conversation saves fine.
 //
-// The lines come from the project's own dialogue and lore files. Where there was nothing written yet,
-// the text is marked "(draft)" below so it's easy to find and replace.
+// The lines come from the project's own dialogue and lore files. A few places had nothing written yet, and have short lines of their own:
+// the road north in the field, the dead Keeper, Vastios before the trial and at the oath, and the robes.
 
 export type Who = "narrator" | "note" | "mallakoth" | "vastios" | "wilfred" | "drawf" | "master" | "stefan" | "alexis" | "clavicus" | "joshua" | "ricky";
 
@@ -50,7 +50,7 @@ export const LORE: string[] = [
   "\"The battle was going well; we were winning until the Parkan wizards unleashed their antimatter magic. We thought retreat and our heavy casualties would be the worst parts of that day. Then the ground started rumbling and a hole to the Underworld opened up.\"\n\n— Excerpt from a Loudousani army captain",
 ];
 
-// What the note does once it's alive. (draft) Replace with the real list.
+// What the note does once it's alive.
 export const NOTE_QUIPS: string[] = [
   "The note flaps one corner at you. \"Eyes up here.\"",
   "The note slides off the table, lands face down, and refuses to be picked up.",
@@ -118,7 +118,7 @@ export const NODES: Record<string, Node> = {
   spike_hatch: { who: "narrator", text: "Behind Stefan's dead end, a floorboard is loose. Beneath it, a narrow chamber, its floor pocked with little holes. Step down?", choices: [{ label: "Step down.", fx: "travel" }, { label: "Leave it." }] },
   spikes_in: say("narrator", "The floor ticks and clicks beneath your boots. Something is about to rise out of those holes. Run for the far end!"),
   spikes_out: say("narrator", "You tumble out the far side as the spikes slam up behind you. In a crack by the wall: a forgotten purse, and a potion."),
-  edge_north: say("narrator", "(draft) The road north leads to the Slime Fields. You'll be taken there when the time comes."),
+  edge_north: say("narrator", "The road north leads to the Slime Fields. You'll be taken there when the time comes."),
   spring_in: { who: "narrator", text: "Warm, pale light shimmers on a sunken pool, and a man sits in it with his eyes shut, humming. The water is magical. Step into the spring?", choices: [{ label: "Step in.", fx: "travel" }, { label: "Not now." }] },
   spring_out: { who: "narrator", text: "Climb out of the spring?", choices: [{ label: "Climb out.", fx: "travel" }, { label: "Stay a while." }] },
   go_caves: {
@@ -194,7 +194,7 @@ export const NODES: Record<string, Node> = {
   note_no: say("narrator", "You leave the note alone."),
   note_q: say("note", ""),
   sign_text: say("narrator", ""),
-  keeper_dead: say("narrator", "(draft) A Keeper, long dead, slumped against the wall with a book still open in his lap. Whatever he was reading, it didn't save him."),
+  keeper_dead: say("narrator", "A Keeper, long dead, slumped against the wall with a book still open in his lap. Whatever he was reading, it didn't save him."),
   fake_altar: say("narrator", "A shimmering altar of false flame. It looks right, and it feels wrong. Somewhere, the true one is waiting."),
   sm_slimes: {
     who: "master",
@@ -269,7 +269,7 @@ export const NODES: Record<string, Node> = {
   shelf_empty: say("narrator", "The shelf is full of old, dry books. You've already read the one worth reading."),
 
   // ------------------------------------------------------------------ the slime fields
-  vvalley1: say("vastios", "(draft) Ready? Hold on to something. This is where your trial begins.", undefined, { fx: "toSlimes" }),
+  vvalley1: say("vastios", "Ready? Hold on to something. This is where your trial begins.", undefined, { fx: "toSlimes" }),
   vslime1: say("vastios", "We made it. Your final trial. This is your trial to complete alone. But I will tell you this: collect the Lightbringer blade from the statue of Atronius."),
   vslime_again: say("vastios", "The blade is in the statue of Atronius. Ask it if you are worthy."),
   statue1: {
@@ -321,10 +321,10 @@ export const NODES: Record<string, Node> = {
       { label: "I am not ready for all this responsibility.", to: "oath_wait" },
     ],
   },
-  oath_wait: say("vastios", "(draft) Take your time, Mallakoth. The flame will wait. It always has.", "oath3"),
+  oath_wait: say("vastios", "Take your time, Mallakoth. The flame will wait. It always has.", "oath3"),
   oath4: say("wilfred", "Now both of you must put your hand inside the sacred flame. May the scarring show your allegiance to the order.", "oath5"),
   oath5: say("narrator", "Wilfred and Vastios already carry the scars, pale against the purple light. Drawf goes first, jaw tight. Mallakoth follows. The flame doesn't feel like fire. It feels like a decision.", "oath6", { scene: "flame" }),
-  oath6: say("narrator", "(draft) The robes come out: white and gold for the Lightbringer, deep bronze for the Keeper. They are heavier than they look.", "oath7", { scene: "robes" }),
+  oath6: say("narrator", "The robes come out: white and gold for the Lightbringer, deep bronze for the Keeper. They are heavier than they look.", "oath7", { scene: "robes" }),
   oath7: say("drawf", "What are you going to do now?", "oath8"),
   oath8: say("mallakoth", "I need to go on a journey.", "oath9"),
   oath9: say("drawf", "Across Mereddia?", "oath10"),
