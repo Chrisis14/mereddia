@@ -737,7 +737,7 @@ function Inventory({ s, dispatch, open, onOpenChange }: { s: State; dispatch: (a
                 }
               />
               <Row icon={<Sprite name={ITEM.coin} className="size-7" />} name={`Gold · ${s.gold}`} />
-              <Row icon={<Sprite name={ITEM.key} className="size-7" />} name={`Keys · ${s.keys}`} text="Each one opens a locked door, once." />
+              <Row icon={<Sprite name={ITEM.key} className="size-7" />} name={`Keys · ${s.keys}`} text="Copper keys. Each one opens a locked door, once." />
               {(s.wood ?? 0) > 0 && <Row icon={<TreeIcon size={24} weight="fill" />} name={`Wood · ${s.wood}`} text="From trees, with the axe. For crafting." />}
               {(s.stone ?? 0) > 0 && <Row icon={<CubeIcon size={24} weight="fill" />} name={`Stone · ${s.stone}`} text="From rocks, with the pickaxe. For crafting." />}
               {s.shield && <Row icon={<Sprite name={ITEM.shield} className="size-7" />} name="Shield" text="+2 defense." />}
