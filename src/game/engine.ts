@@ -211,7 +211,8 @@ export function newGame(seed = Date.now()): State {
     magic: { fire: 1, water: 1, air: 1, earth: 1, universal: 1 },
     weapon: "fists",
     weapons: ["fists"],
-    items: {},
+    // Half of a broken pair, worn on a cord from the very start (see ITEMS in inventory.ts).
+    items: { token: true },
     shield: false,
     poisoned: false,
     entities: AREA_IDS.flatMap((a) => parseArea(a).entities.map((e) => ({ ...e }))),

@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpIcon,
+  BackpackIcon,
   CheckCircleIcon,
   CircleIcon,
   HourglassIcon,
@@ -43,6 +44,7 @@ import { MiniMap, resetSeen } from "./MiniMap";
 import { CUTSCENES, type Aim, type Step } from "./cutscenes";
 import { act, attackOf, boulderTile, COMBO_MAX, DODGE_COST, type Intent, defenseOf, groundAt, isState, maxHp, maxMana, newGame, potionCap, slimesLeft, STAMINA_MAX, xpToNext, type Action, type Dir, type State } from "./engine";
 import { NAMES, NODES, type Who } from "./story";
+import { carried } from "./inventory";
 import { ELEMENT_COLOR } from "./art";
 import type { EffectWant, Stage } from "./three/stage";
 import { AREAS, ELEMENTS, bound, isIndoor, zoneAt, ENEMIES, QUESTS, SPELLS, WEAPONS, SPECIAL_MAX, sizeOf, type EnemyKind } from "./world";
@@ -118,11 +120,6 @@ function Hud({ s, dispatch }: { s: State; dispatch: (a: Action) => void }) {
         <Stat icon={<Sprite name={ITEM.coin} className="size-5" />} value={s.gold} label="Gold" />
         <Stat icon={<Sprite name={ITEM.potion} className="size-5" />} value={`${s.potions}/${potionCap(s)}`} label="Potions" />
         <Stat icon={<Sprite name={ITEM.key} className="size-5" />} value={s.keys} label="Keys" />
-        {(s.wood ?? 0) > 0 && <Stat icon={<TreeIcon size={20} weight="fill" />} value={s.wood ?? 0} label="Wood" />}
-        {(s.stone ?? 0) > 0 && <Stat icon={<CubeIcon size={20} weight="fill" />} value={s.stone ?? 0} label="Stone" />}
-        {s.items.pickaxe && <Stat icon={<Pickaxe className="size-5" />} value="Pickaxe" label="Item" />}
-        {s.shield && <Stat icon={<Sprite name={ITEM.shield} className="size-5" />} value="Shield" label="Shield" />}
-        {s.items.prismGel && <Stat icon={<Crystal el="universal" className="size-5" />} value="Prism Gel" label="Item" />}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {s.weapons.length > 1 ? (
@@ -681,6 +678,100 @@ function Journal({ s }: { s: State }) {
   );
 }
 
+// Everything Mallakoth is carrying, in a drawer (press I). Gold, potions and keys stay on the HUD; the rest is here.
+function Inventory({ s, dispatch, open, onOpenChange }: { s: State; dispatch: (a: Action) => void; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const calm = s.mode === "explore";
+  const items = carried(s);
+  const Row = ({ icon, name, text, right }: { icon: ReactNode; name: string; text?: string; right?: ReactNode }) => (
+    <li className="flex items-center gap-3 rounded-lg bg-card px-3 py-2">
+      <span className="grid size-8 shrink-0 place-items-center">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-footnote font-medium">{name}</span>
+        {text ? <span className="block text-caption text-muted-foreground">{text}</span> : null}
+      </span>
+      {right}
+    </li>
+  );
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="Inventory (I)">
+          <BackpackIcon size={22} weight="bold" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[85dvh]">
+        <DrawerHeader className="text-left">
+          <DrawerTitle>Inventory</DrawerTitle>
+          <DrawerDescription>Press I to open this. Weapons can be changed and potions drunk while you are exploring.</DrawerDescription>
+        </DrawerHeader>
+        <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+16px)]">
+          <section aria-label="Weapons">
+            <h3 className="mb-1.5 font-display text-heading">Weapons</h3>
+            <ul className="flex flex-col gap-1.5">
+              {s.weapons.map((w) => (
+                <Row
+                  key={w}
+                  icon={<WeaponIcon id={w} className="size-7" />}
+                  name={`${WEAPONS[w].name}${WEAPONS[w].atk ? ` · +${WEAPONS[w].atk} attack` : ""}`}
+                  text={WEAPONS[w].trait}
+                  right={
+                    <Button size="sm" variant={s.weapon === w ? "default" : "secondary"} disabled={!calm || s.weapon === w} aria-label={`Equip ${WEAPONS[w].name}`} onClick={() => dispatch({ type: "equip", weapon: w })}>
+                      {s.weapon === w ? "Equipped" : "Equip"}
+                    </Button>
+                  }
+                />
+              ))}
+            </ul>
+          </section>
+          <section aria-label="Supplies">
+            <h3 className="mb-1.5 font-display text-heading">Supplies</h3>
+            <ul className="flex flex-col gap-1.5">
+              <Row
+                icon={<Sprite name={ITEM.potion} className="size-7" />}
+                name={`Potions · ${s.potions}/${potionCap(s)}`}
+                text="Heals you and cures poison."
+                right={
+                  <Button size="sm" variant="secondary" disabled={!calm || s.potions <= 0} onClick={() => dispatch({ type: "potion" })}>
+                    Drink
+                  </Button>
+                }
+              />
+              <Row icon={<Sprite name={ITEM.coin} className="size-7" />} name={`Gold · ${s.gold}`} />
+              <Row icon={<Sprite name={ITEM.key} className="size-7" />} name={`Keys · ${s.keys}`} text="Each one opens a locked door, once." />
+              {(s.wood ?? 0) > 0 && <Row icon={<TreeIcon size={24} weight="fill" />} name={`Wood · ${s.wood}`} text="From trees, with the axe. For crafting." />}
+              {(s.stone ?? 0) > 0 && <Row icon={<CubeIcon size={24} weight="fill" />} name={`Stone · ${s.stone}`} text="From rocks, with the pickaxe. For crafting." />}
+              {s.shield && <Row icon={<Sprite name={ITEM.shield} className="size-7" />} name="Shield" text="+2 defense." />}
+            </ul>
+          </section>
+          {items.length > 0 && (
+            <section aria-label="Items">
+              <h3 className="mb-1.5 font-display text-heading">Items</h3>
+              <ul className="flex flex-col gap-1.5">
+                {items.map(([id, info]) => (
+                  <Row
+                    key={id}
+                    icon={id === "pickaxe" ? <Pickaxe className="size-7" /> : id === "prismGel" ? <Crystal el="universal" className="size-7" /> : id === "axe" ? <WeaponIcon id="axe" className="size-7" /> : <SparkleIcon size={24} weight="fill" />}
+                    name={info.name}
+                    text={info.text}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
+          {s.companion && (
+            <section aria-label="Companion">
+              <h3 className="mb-1.5 font-display text-heading">Companion</h3>
+              <ul className="flex flex-col gap-1.5">
+                <Row icon={<Ricky className="size-7" />} name="Ricky the Chest" text="Follows you everywhere except into buildings, and carries your spare potions (the pack holds up to 10)." />
+              </ul>
+            </section>
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
 // What to do next, in plain words.
 function objective(s: State): string {
   if (s.flags.epilogue) return "Chapter 1 begins in Dresden. (Coming soon.)";
@@ -1016,6 +1107,7 @@ function useCues() {
 export function MereddiaGame() {
   const [state, setState] = useState<State>(load);
   const [sprint, setSprint] = useState(false);
+  const [invOpen, setInvOpen] = useState(false);
   const latest = useRef(state);
   const cues = useCues();
   useGameAudio(state);
@@ -1093,6 +1185,11 @@ export function MereddiaGame() {
       if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement | null)?.closest("button, input, textarea, summary, [role=dialog]")) return;
       const cur = latest.current;
       let action: Action | undefined;
+      if ((e.key === "i" || e.key === "I") && !e.repeat && cur.mode === "explore") {
+        e.preventDefault();
+        setInvOpen((o) => !o);
+        return;
+      }
       if (cur.mode === "battle") {
         const k = BATTLE_KEYS[e.key as "1"];
         action = k ? ({ type: k } as Action) : undefined;
@@ -1239,6 +1336,7 @@ export function MereddiaGame() {
           {objective(s)}
         </p>
         <div className="flex items-center">
+          <Inventory s={s} dispatch={dispatch} open={invOpen} onOpenChange={setInvOpen} />
           <Journal s={s} />
           <AlertDialog>
             <AlertDialogTrigger asChild>

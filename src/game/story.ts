@@ -86,7 +86,7 @@ export function drawfAdvice(s: State): string {
 
 export const NODES: Record<string, Node> = {
   // ------------------------------------------------------------------ the field
-  intro1: say("narrator", "Mallakoth wakes in a quiet field, west of the Unyielding Mountains. A carrier pigeon drops out of the sky and lets a letter fall into his hands.", "intro2"),
+  intro1: say("narrator", "Mallakoth wakes in a quiet field, west of the Unyielding Mountains. Half of a broken token hangs on a cord at his neck, notched along one edge as if it once fit against another. A carrier pigeon drops out of the sky and lets a letter fall into his hands.", "intro2"),
   intro2: say(
     "note",
     "Mallakoth,\n\nI hope this letter reaches you in time. It has been too long since we last spoke, but there is no time for pleasantries. The break is over, and the Lightbringers need all the help they can get. The demonic forces grow bolder with each passing day, their attacks relentless. We cannot afford hesitation.\n\nMeet me in the Valley of Time, deep within the Unyielding Mountains. The path will be treacherous, but you knew this when you became an apprentice Lightbringer. You swore your allegiance, and now the time has come to prove it.\n\nI will be waiting, but do not delay, every moment counts.\n\n— Vastios",
@@ -323,7 +323,8 @@ export const NODES: Record<string, Node> = {
   },
   oath_wait: say("vastios", "Take your time, Mallakoth. The flame will wait. It always has.", "oath3"),
   oath4: say("wilfred", "Now both of you must put your hand inside the sacred flame. May the scarring show your allegiance to the order.", "oath5"),
-  oath5: say("narrator", "Wilfred and Vastios already carry the scars, pale against the purple light. Drawf goes first, jaw tight. Mallakoth follows. The flame doesn't feel like fire. It feels like a decision.", "oath6", { scene: "flame" }),
+  oath5: say("narrator", "Wilfred and Vastios already carry the scars, pale against the purple light. Drawf goes first, jaw tight. Mallakoth follows. The flame doesn't feel like fire. It feels like a decision.", "oath5b", { scene: "flame" }),
+  oath5b: say("narrator", "When Mallakoth's hand comes out of the flame, the half-token at his neck is warm. Vastios looks at it, and then, a moment too late, looks away.", "oath6"),
   oath6: say("narrator", "The robes come out: white and gold for the Lightbringer, deep bronze for the Keeper. They are heavier than they look.", "oath7", { scene: "robes" }),
   oath7: say("drawf", "What are you going to do now?", "oath8"),
   oath8: say("mallakoth", "I need to go on a journey.", "oath9"),
