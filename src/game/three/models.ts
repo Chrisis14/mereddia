@@ -14,6 +14,8 @@ export type Flame = { advance(dt: number, active: boolean): void };
 const isPurple = (r: number, g: number, b: number) => b > g + 35 && r > g + 18;
 // How far the colours have slid at each step: out and back.
 const SLIDE = [0, 1, 2, 3, 2, 1];
+// The width and height of one frame's palette in a model's atlas (see atlasOf in tools/mereddia/convert.mjs).
+const CELL = 128;
 
 function flameOf(bmp: ImageBitmap): { tex: THREE.CanvasTexture; flame: Flame } | null {
   const cv = document.createElement("canvas");
@@ -24,21 +26,25 @@ function flameOf(bmp: ImageBitmap): { tex: THREE.CanvasTexture; flame: Flame } |
   g.drawImage(bmp, 0, 0);
   const img = g.getImageData(0, 0, cv.width, cv.height);
   const d = img.data;
-  // Per row: where its purple pixels are, and what colours they were drawn in.
+  // Per row of each frame's own palette cell (the atlas is a grid of 128x128 cells, one per animation frame): where its purple pixels
+  // are, and what colours they were drawn in. Each cell slides on its own, so every frame shimmers exactly the same way; sliding a
+  // whole atlas row at once let the colours from the neighbouring frames' cells leak in, and some frames came out lighter than the rest.
   const rows: { at: number[]; was: [number, number, number][] }[] = [];
   const shades = new Set<number>();
   for (let y = 0; y < cv.height; y++) {
-    const at: number[] = [];
-    const was: [number, number, number][] = [];
-    for (let x = 0; x < cv.width; x++) {
-      const i = (y * cv.width + x) * 4;
-      if (d[i + 3] === 255 && isPurple(d[i], d[i + 1], d[i + 2])) {
-        at.push(i);
-        was.push([d[i], d[i + 1], d[i + 2]]);
-        shades.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+    for (let x0 = 0; x0 < cv.width; x0 += CELL) {
+      const at: number[] = [];
+      const was: [number, number, number][] = [];
+      for (let x = x0; x < Math.min(cv.width, x0 + CELL); x++) {
+        const i = (y * cv.width + x) * 4;
+        if (d[i + 3] === 255 && isPurple(d[i], d[i + 1], d[i + 2])) {
+          at.push(i);
+          was.push([d[i], d[i + 1], d[i + 2]]);
+          shades.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+        }
       }
+      if (at.length > 1) rows.push({ at, was });
     }
-    if (at.length > 1) rows.push({ at, was });
   }
   if (shades.size < 2) return null;
   const tex = new THREE.CanvasTexture(cv);
