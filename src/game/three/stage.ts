@@ -99,7 +99,12 @@ function buildMountains(map: MapData, models: string[], material: THREE.Material
     const near = t > 0 ? 1 - 0.78 * Math.min(1, t * 1.15) : 1;
     return Math.min(15, (0.4 + d * 0.9 + ridge * Math.min(1, d / 3)) * near);
   };
-  const corner = (cx: number, cy: number) => (cellHeight(cx - 1, cy - 1) + cellHeight(cx, cy - 1) + cellHeight(cx - 1, cy) + cellHeight(cx, cy)) / 4;
+  // A corner that touches open ground stays on the ground. Averaging it with the cells around it lifted the mountain's foot half a
+  // tile off the valley floor, with nothing beneath: from the camera's height you could see the sky's ground through the gap.
+  const corner = (cx: number, cy: number) =>
+    open.has(`${cx - 1},${cy - 1}`) || open.has(`${cx},${cy - 1}`) || open.has(`${cx - 1},${cy}`) || open.has(`${cx},${cy}`)
+      ? 0
+      : (cellHeight(cx - 1, cy - 1) + cellHeight(cx, cy - 1) + cellHeight(cx - 1, cy) + cellHeight(cx, cy)) / 4;
   const pos: number[] = [];
   const col: number[] = [];
   const c = new THREE.Color();
@@ -394,7 +399,12 @@ export class Stage {
               a.play("plate_up");
               this.plates.set(`${p.m}@${p.x},${p.y}`, a);
             } else if (STILL.has(m)) (this.scrub.get(m) ?? this.scrub.set(m, { actors: [], now: 0, want: 0 }).get(m)!).actors.push(a);
-            else a.play(Object.keys(model.animations)[0] ?? "");
+            else {
+              // A wall piece whose first animation is "open" (the temple's stone walls, the lowered altar) is a door waiting for its
+              // moment: at rest it is shut, frame 0. Playing it would leave every one of them standing open and thin as a post.
+              const first = Object.keys(model.animations)[0] ?? "";
+              if (!/^open$/i.test(first)) a.play(first);
+            }
             this.root.add(a.mesh);
             this.actors.push(a);
             if (high) this.high.push(a.mesh);

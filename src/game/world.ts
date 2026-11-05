@@ -416,7 +416,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
     rows: templeGrid.rows,
     sym: {},
     arrive: { x: 36, y: 32 },
-    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"], pitch: 0.78, distance: 14 },
+    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"] },
     zones: [
       { id: "falls", name: "Behind the Falls", rect: [32, 1, 34, 2] },
       { id: "hideout", name: "The Secret Master's Hideout", rect: [1, 9, 8, 17] },
