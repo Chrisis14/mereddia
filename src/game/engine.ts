@@ -779,6 +779,7 @@ function go(s: State, to: Spot) {
   s.area = to.area;
   delete s.spike;
   s.pos = { x: to.x, y: to.y };
+  if (to.face) s.facing = to.face;
   s.hazards = [];
   delete s.boulder;
   delete s.flags.rainy;

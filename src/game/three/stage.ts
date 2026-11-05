@@ -124,7 +124,7 @@ function buildMountains(map: MapData, models: string[], material: THREE.Material
       const k = `${x},${y}`;
       if (open.has(k) || !(wall.has(k) || dist.has(k))) continue;
       const h00 = corner(x, y), h10 = corner(x + 1, y), h01 = corner(x, y + 1), h11 = corner(x + 1, y + 1);
-      if (h00 + h10 + h01 + h11 < 0.01) continue;
+      // (Even a cell with no height is drawn: skipped, it left a hole that showed the sky's pale ground through, past the valley's south end.)
       const sh = noise(x * 3.1, y * 1.7);
       // Split each cell along the shorter diagonal so ridges stay sharp.
       if (Math.abs(h00 - h11) < Math.abs(h10 - h01)) {
@@ -312,6 +312,9 @@ export class Stage {
   private scenery = new Map<string, Actor>();
   // Blocks that make up a door in the mountain, by the door's cell, and which of them have been told to open.
   private doors = new Map<string, Actor[]>();
+  // The rooms whose roofs lift off, with the pieces of each; and whether the hero is inside one (then every roof is off).
+  private roofZones: { rect: [number, number, number, number]; objs: THREE.Object3D[] }[] = [];
+  private indoors = false;
   private doorsSeen = new Set<string>();
   // The floor's pressure plates, by "model@x,y".
   private plates = new Map<string, Actor>();
@@ -369,13 +372,16 @@ export class Stage {
   // `mountains` names the wall tiles to draw as real mountains instead of blocks.
   // `cutZ` drops every tile from that height up (the caves' ceilings), so the rooms can be seen into.
   // `doors` are cells ("x,y" in the map's own tile numbers) where the mountain's blocks are a door that can open (the secret rock in the valley wall).
-  async loadMap(name: string, mountains: string[] = [], cutZ = Infinity, doors: string[] = []): Promise<MapData> {
+  // `roofs` are the rooms ("x0,y0,x1,y1" rectangles in the map's own tile numbers) whose roofs and upper walls lift off while the hero is inside, or while the
+  // camera would otherwise have to look through them.
+  async loadMap(name: string, mountains: string[] = [], cutZ = Infinity, doors: string[] = [], roofs: [number, number, number, number][] = []): Promise<MapData> {
     const map = (await (await fetch(`${import.meta.env.BASE_URL}mereddia/3d/maps/${slug(name)}.json`)).json()) as MapData;
     this.root.clear();
     this.actors.length = 0;
     this.scenery.clear();
     this.doors.clear();
     this.doorsSeen.clear();
+    this.roofZones = roofs.map((rect) => ({ rect, objs: [] }));
     this.plates.clear();
     this.live.clear();
     this.high = [];
@@ -397,17 +403,20 @@ export class Stage {
     const doorCells = new Set(doors);
     const doorBlocks: Placed[] = [];
     for (const t of map.tiles) {
-      if (mountains.includes(t.m) && doorCells.has(`${t.x},${t.y}`) && t.m === "Wall3") doorBlocks.push(t);
+      // (Only the lowest blocks: the project piled seven high, which stands up out of the lower mountain like a chimney.)
+      if (mountains.includes(t.m) && doorCells.has(`${t.x},${t.y}`) && t.m === "Wall3" && t.z <= 32) doorBlocks.push(t);
       if (mountains.includes(t.m) || t.z >= cutZ || (name === "Caves" && t.m === "carpet")) continue;
       const m = name === "The Temple" && /^(Wall6|wall7|wall8)$/.test(t.m) ? `${t.m}~rock` : t.m;
-      const k = `${m}|${upper(t) ? 1 : 0}`;
+      const rz = upper(t) ? roofs.findIndex((r) => t.x >= r[0] - 1 && t.x <= r[2] + 1 && t.y >= r[1] - 1 && t.y <= r[3] + 1) : -1;
+      const k = `${m}|${upper(t) ? 1 : 0}|${rz}`;
       (byModel.get(k) ?? byModel.set(k, []).get(k)!).push(t);
     }
     if (mountains.length) this.root.add(buildMountains(map, mountains, this.material));
     await Promise.all(
       [...byModel].map(async ([key, list]) => {
-        const m = key.split("|")[0];
-        const high = key.endsWith("|1");
+        const [m, hi, rzKey] = key.split("|");
+        const high = hi === "1";
+        const roof = this.roofZones[Number(rzKey)];
         const model = await loadModel("tiles", m);
         if (!model) return;
         if (model.frames.length === 1) {
@@ -427,6 +436,7 @@ export class Stage {
           inst.receiveShadow = true;
           this.root.add(inst);
           if (high) this.high.push(inst);
+          if (roof) roof.objs.push(inst);
         } else {
           for (const p of list) {
             const a = new Actor(model, this.see(model.material, 0.45));
@@ -445,6 +455,7 @@ export class Stage {
             this.root.add(a.mesh);
             this.actors.push(a);
             if (high) this.high.push(a.mesh);
+            if (roof) roof.objs.push(a.mesh);
           }
         }
       }),
@@ -678,7 +689,31 @@ export class Stage {
 
   // Take the roof off: upper walls and roofs vanish while the hero is inside a building.
   setIndoors(indoors: boolean) {
+    this.indoors = indoors;
     for (const o of this.high) o.visible = !indoors;
+  }
+
+  // Outdoors, a room's roof lifts off while the camera's line to the hero passes through the room, so a building behind him never fills the screen.
+  private updateRoofs() {
+    if (this.indoors || !this.follow || !this.roofZones.length) return;
+    const ax = this.follow.pos.x, az = this.follow.pos.z;
+    const dx = this.camera.position.x - ax, dz = this.camera.position.z - az;
+    for (const z of this.roofZones) {
+      const x0 = (z.rect[0] - 1) * TILE, x1 = (z.rect[2] + 2) * TILE, z0 = (z.rect[1] - 1) * TILE, z1 = (z.rect[3] + 2) * TILE;
+      // Whether the segment from the hero to the camera crosses the room (slab test).
+      let lo = 0, hi = 1;
+      for (const [p, d, a, b] of [[ax, dx, x0, x1], [az, dz, z0, z1]] as const) {
+        if (Math.abs(d) < 1e-9) {
+          if (p < a || p > b) { lo = 2; break; }
+        } else {
+          const t1 = (a - p) / d, t2 = (b - p) / d;
+          lo = Math.max(lo, Math.min(t1, t2));
+          hi = Math.min(hi, Math.max(t1, t2));
+        }
+      }
+      const hit = lo <= hi;
+      for (const o of z.objs) if (o.visible === hit) o.visible = !hit;
+    }
   }
 
   // Show or hide the map's own scenery by "model@x,y": the sword on the statue, a tree that has been felled,
@@ -1145,6 +1180,7 @@ export class Stage {
       }
       this.camera.lookAt(this.focus.x + Math.cos(this.yaw) * this.shoulderNow, this.focus.y + 0.55, this.focus.z - Math.sin(this.yaw) * this.shoulderNow);
       this.aimHole();
+      this.updateRoofs();
       this.focusTarget.position.copy(this.focus);
       this.sun?.position.set(this.focus.x - 6, this.focus.y + 12, this.focus.z + 7);
       this.renderer.render(this.scene, this.camera);

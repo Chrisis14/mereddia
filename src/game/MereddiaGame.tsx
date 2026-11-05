@@ -220,6 +220,12 @@ const FINALE_CAST: { who: string; name: string; x: number; y: number; rotY: numb
 const DEF_PITCH = 0.6;
 const DEF_DIST = 5.6;
 
+// The rooms whose roofs lift off, in the map's own tile numbers: the area's own list, or every room marked indoors.
+function roofsOf(def: (typeof AREAS)[keyof typeof AREAS], x0: number, y0: number): [number, number, number, number][] {
+  const rects = def.map3d?.roofs ?? (def.zones ?? []).filter((z) => z.indoor).map((z) => z.rect);
+  return rects.map(([a, b, c, d]) => [a + x0, b + y0, c + x0, d + y0]);
+}
+
 function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: number }; onDone?: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<Stage | null>(null);
@@ -455,7 +461,7 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
       }
       made.distance = m3.distance ?? DEF_DIST;
       made.summer = !!m3.summer;
-      await made.loadMap(m3.name, m3.mountains, m3.cutZ, m3.doors);
+      await made.loadMap(m3.name, m3.mountains, m3.cutZ, m3.doors, roofsOf(def, m3.x0, m3.y0));
       if (!alive) return;
       await apply();
       const { world } = await import("./three/bind");

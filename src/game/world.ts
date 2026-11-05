@@ -25,7 +25,7 @@ export type Ground = "#" | "~" | "." | "=" | "w" | "s";
 export const WALKABLE: Ground[] = [".", "=", "w", "s"];
 
 export type EntityKind = "npc" | "enemy" | "chest" | "pot" | "gate" | "panel" | "button" | "lever" | "plate" | "pickup" | "crystal" | "exit" | "prop";
-export type Spot = { area: AreaId; x: number; y: number };
+export type Spot = { area: AreaId; x: number; y: number; face?: Dir };
 export type Entity = {
   id: string;
   area: AreaId;
@@ -180,7 +180,7 @@ export type AreaDef = {
   arrive?: { x: number; y: number };
   // Areas built from the project's own 3D maps: the converted map's name, and the grid's offset in it.
   // `mountains` lists wall tiles the 3D view draws as real mountains.
-  map3d?: { name: string; x0: number; y0: number; mountains?: string[]; pitch?: number; distance?: number; cutZ?: number; summer?: boolean; doors?: string[] };
+  map3d?: { name: string; x0: number; y0: number; mountains?: string[]; pitch?: number; distance?: number; cutZ?: number; summer?: boolean; doors?: string[]; roofs?: [number, number, number, number][] };
   // Things standing in the area that the map data places rather than the rows.
   extra?: (Spec & { x: number; y: number })[];
   // Parts of a big map with a name of their own, and whether they are buildings (Ricky waits outside those).
@@ -197,7 +197,7 @@ export type AreaDef = {
 const npc = (what: string): Spec => ({ kind: "npc", what });
 const prop = (what: string): Spec => ({ kind: "prop", what });
 const btn = (what: string): Spec => ({ kind: "button", what });
-const exit = (area: AreaId, x: number, y: number, ask?: string): Spec => ({ kind: "exit", what: area, to: { area, x, y }, ask });
+const exit = (area: AreaId, x: number, y: number, ask?: string, face?: Dir): Spec => ({ kind: "exit", what: area, to: { area, x, y, ...(face ? { face } : {}) }, ask });
 const trigger = (what: string): Spec => ({ kind: "plate", what: `t:${what}` });
 
 type GridEntity = Grid["entities"][number];
@@ -223,7 +223,8 @@ function bind(grid: Grid, rule: (e: GridEntity, grid: Grid) => Spec | null): (Sp
       spec = rule(e, grid);
       if (spec) break;
     }
-    if (!spec && list.some((e) => e.kind === "objects" && e.passable === false)) spec = prop("scenery");
+    // (A bridge is marked solid in the project, but it is the one thing in the way you are meant to walk over.)
+    if (!spec && list.some((e) => e.kind === "objects" && e.passable === false && e.m !== "bridge")) spec = prop("scenery");
     if (!spec) continue;
     // (Only the pickaxe is taken from its rock: the rock stays, so only the pickaxe is what the rules stand in for.)
     const src = list.filter((e) => e.kind !== "tiles" && (spec!.what !== "pickrock" || e.m === "pickaxe")).map((e) => `${e.m}@${e.x + grid.x0},${e.y + grid.y0}`).join("|");
@@ -285,7 +286,8 @@ const cavesRule = (e: GridEntity): Spec | null => {
   if (s === "Mal_First_Time") return trigger("master");
   if (s === "move_boulder") return trigger("boulder");
   if (s === "close_golem") return trigger("golemTrap");
-  if (s.includes('load_map("The Temple"')) return exit("temple", 36, 32);
+  if (s.includes('load_map("The Temple"')) // Out of the caves you come up a few steps in front of the cave mouth, facing back at it, so it is the arch you see and not the mountain behind it.
+    return exit("temple", 35, 29, undefined, "down");
   if (s.includes("QUEST_0005")) return trigger("golemQuest");
   return null;
 };
@@ -421,8 +423,8 @@ export const AREAS: Record<AreaId, AreaDef> = {
     theme: "valley",
     rows: templeGrid.rows,
     sym: {},
-    arrive: { x: 36, y: 32 },
-    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"], doors: [`${13 + templeGrid.x0},${13 + templeGrid.y0}`] },
+    arrive: { x: 35, y: 29 },
+    map3d: { name: "The Temple", x0: templeGrid.x0, y0: templeGrid.y0, mountains: ["Wall", "Wall2", "Wall3", "Wall4", "Wall5"], doors: [`${13 + templeGrid.x0},${13 + templeGrid.y0}`], roofs: [[18, 5, 24, 17]] },
     zones: [
       { id: "falls", name: "Behind the Falls", rect: [32, 1, 34, 2] },
       { id: "hideout", name: "The Secret Master's Hideout", rect: [1, 9, 8, 17] },
