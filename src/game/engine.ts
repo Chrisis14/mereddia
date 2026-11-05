@@ -31,6 +31,7 @@ import {
   type WeaponId,
 } from "./world";
 import { LORE, NODES, NOTE_QUIPS, type Choice } from "./story";
+import { COATS } from "./looks";
 
 export type { Dir } from "./world";
 
@@ -46,6 +47,8 @@ export type Action =
   | { type: "turn"; dir: Dir }
   | { type: "next" }
   | { type: "choose"; i: number }
+  // Text typed into a prompt (a horse's name).
+  | { type: "input"; text: string }
   | { type: "attack" }
   | { type: "guard" }
   | { type: "dodge" }
@@ -117,8 +120,12 @@ export type State = {
   items: Record<string, true>;
   shield: boolean;
   poisoned: boolean;
-  companion?: "ricky";
+  // The one companion who follows him: Ricky the chest, or a horse bought outside Dresden's gate.
+  companion?: "ricky" | "horse";
   ricky?: { x: number; y: number };
+  horse?: { name: string; coat: string; at?: { x: number; y: number }; face: Dir };
+  // The coat chosen for a horse being bought, until it has a name and is paid for.
+  horseDraft?: string;
   entities: Entity[];
   flags: Record<string, true>;
   quests: Record<string, true>;
@@ -166,7 +173,21 @@ export const maxMana = (s: Pick<State, "level" | "manaBonus">) => 6 + 2 * (s.lev
 export const attackOf = (s: Pick<State, "level" | "weapon">) => 3 + 2 * (s.level - 1) + WEAPONS[s.weapon].atk;
 export const defenseOf = (s: Pick<State, "level" | "shield" | "weapon">) => s.level + (s.shield ? 2 : 0) - (s.weapon === "axe" ? 1 : 0);
 export const xpToNext = (level: number) => 12 * level;
-export const potionCap = (s: Pick<State, "companion">) => (s.companion ? 10 : 4);
+export const potionCap = (s: Pick<State, "companion">) => (s.companion === "ricky" ? 10 : 4);
+// Potions found or bought, up to what the pack holds (never taking away any already carried).
+const gainPotions = (s: State, n: number) => {
+  s.potions = Math.max(s.potions, Math.min(potionCap(s), s.potions + n));
+};
+export const HORSE_PRICE = 5;
+
+// Whoever follows him comes to stand where he was.
+function follow(s: State, from: { x: number; y: number } | undefined, toward?: { x: number; y: number }) {
+  if (s.companion === "ricky") s.ricky = from;
+  if (s.companion === "horse" && s.horse) {
+    s.horse.at = from;
+    if (from && toward && (toward.x !== from.x || toward.y !== from.y)) s.horse.face = Math.abs(toward.x - from.x) >= Math.abs(toward.y - from.y) ? (toward.x > from.x ? "right" : "left") : toward.y > from.y ? "down" : "up";
+  }
+}
 
 // ---------------------------------------------------------------------------------------- setup
 
@@ -402,7 +423,14 @@ function dialogue(s: State, a: Action): State {
     else end(s);
     return s;
   }
-  if (a.type === "next" && !choices.length) {
+  if (a.type === "input" && node.input) {
+    runFx(s, node.input.fx, d.ref, a.text);
+    if (s.dlg !== d || s.mode !== "dialogue") return s;
+    if (node.next) show(s, node.next, d.ref);
+    else end(s);
+    return s;
+  }
+  if (a.type === "next" && !choices.length && !node.input) {
     if (node.fx) runFx(s, node.fx, d.ref);
     if (s.dlg !== d || s.mode !== "dialogue") return s;
     if (node.next) show(s, node.next, d.ref);
@@ -412,7 +440,7 @@ function dialogue(s: State, a: Action): State {
 }
 
 // What each effect named in the story does.
-function runFx(s: State, fx: string, ref?: string) {
+function runFx(s: State, fx: string, ref?: string, text?: string) {
   const [name, arg] = fx.split(":");
   switch (name) {
     case "burnLetter":
@@ -501,7 +529,7 @@ function runFx(s: State, fx: string, ref?: string) {
       if (tree) remove(s, tree);
       s.flags.treeFelled = true;
       s.gold += 12;
-      s.potions = Math.min(potionCap(s), s.potions + 1);
+      gainPotions(s, 1);
       s.wood = (s.wood ?? 0) + 3;
       say(s, "You gather 3 pieces of wood.");
       quest(s, "woodcutter");
@@ -532,8 +560,26 @@ function runFx(s: State, fx: string, ref?: string) {
       break;
     case "giveRicky":
       s.companion = "ricky";
+      s.flags.rickyOwned = true;
       s.ricky = { ...s.pos };
       break;
+    case "horseCoat":
+      // The coat picked for the horse being bought.
+      s.horseDraft = arg;
+      break;
+    case "nameHorse": {
+      // Five gold, a coat and a name, and the horse is his. One companion follows him, so Ricky goes home.
+      const name = (text ?? "").replace(/[:|<>]/g, "").trim().slice(0, 16) || "Horse";
+      s.gold = Math.max(0, s.gold - HORSE_PRICE);
+      s.horse = { name, coat: s.horseDraft && COATS[s.horseDraft] ? s.horseDraft : "bay", face: "down" };
+      delete s.horseDraft;
+      if (s.companion === "ricky") delete s.ricky;
+      s.companion = "horse";
+      s.horse.at = { ...s.pos };
+      s.flags.horseBought = true;
+      say(s, `${name} is yours. A ${COATS[s.horse.coat].name.toLowerCase()}, and quicker than walking.`);
+      break;
+    }
     case "vastiosLeaves": {
       s.flags.vastiosGone = true;
       const v = find(s, "temple", "npc", "vastios");
@@ -627,11 +673,11 @@ function go(s: State, to: Spot) {
   delete s.flags.rainy;
   s.stamina = Math.min(STAMINA_MAX, s.stamina + 2);
   s.zone = zoneAt(to.area, to.x, to.y)?.id;
-  if (s.companion) s.ricky = isIndoor(to.area, to.x, to.y) ? undefined : { ...s.pos };
+  follow(s, isIndoor(to.area, to.x, to.y) ? undefined : { ...s.pos });
   if (fromSpikes && !s.flags.spikesDone) {
     s.flags.spikesDone = true;
     s.gold += 15;
-    s.potions = Math.min(potionCap(s), s.potions + 1);
+    gainPotions(s, 1);
     quest(s, "spikes");
     show(s, "spikes_out");
   }
@@ -710,7 +756,7 @@ function move(s: State, dir: Dir, sprint: boolean, keep = false): State {
       if (i === 0) spent = touch(s, block);
       break;
     }
-    if (s.companion) s.ricky = isIndoor(s.area, x, y) ? undefined : { ...s.pos };
+    follow(s, isIndoor(s.area, x, y) ? undefined : { ...s.pos }, { x, y });
     s.pos = { x, y };
     s.steps++;
     moved++;
@@ -899,12 +945,14 @@ function touch(s: State, e: Entity): boolean {
 }
 
 function nodeFor(s: State, e: Entity): string {
+  if (e.what.startsWith("town:")) return townNode(s, e.what.slice(5));
+  if (e.what.startsWith("horse:")) return "horse_look";
   switch (e.what) {
     case "master":
       if (s.area === "caves") return s.flags.metMaster ? "sm_again" : "sm_first1";
       if (s.area === "treehouse") return s.flags.treehouseMet ? "tree_menu" : ((s.flags.treehouseMet = true), "tree1");
       if (s.area === "slimes") return s.flags.treeHint ? "sm_slimes2" : "sm_slimes";
-      if (s.companion) return "sm_has";
+      if (s.flags.rickyOwned) return "sm_has";
       if (s.flags.rickyNo) return "sm_declined";
       return s.flags.metMaster ? "sm_ret1" : "sm_h1";
     case "drawf":
@@ -926,6 +974,12 @@ function nodeFor(s: State, e: Entity): string {
   return "drawf_advice";
 }
 
+// Where a conversation with one of the town's people starts: most simply say their lines in order.
+function townNode(s: State, id: string): string {
+  if (id === "horsevendor") return s.horse ? "horse_have" : "horse1";
+  return `town:${id}:0`;
+}
+
 function openChest(s: State, e: Entity): boolean {
   if (e.done) {
     say(s, "The chest is empty.");
@@ -933,9 +987,16 @@ function openChest(s: State, e: Entity): boolean {
   }
   const { loot, text } = CHESTS[e.what];
   e.done = true;
-  s.potions = Math.min(potionCap(s), s.potions + (loot.potion ?? 0));
+  gainPotions(s, loot.potion ?? 0);
   s.gold += loot.gold ?? 0;
   if (loot.shield) s.shield = true;
+  if (loot.weapon) {
+    if (s.weapons.includes(loot.weapon)) {
+      say(s, "Under the blanket there is only the shape of where a bow used to lie. You already have it. A few coins, then.");
+      return false;
+    }
+    s.weapons.push(loot.weapon);
+  }
   say(s, text);
   return false;
 }
@@ -1394,7 +1455,7 @@ function dash(s: State): State {
     s.trails = s.trails.filter((t) => !(t.area === s.area && t.x === x && t.y === y));
     s.trails.push({ area: s.area, x, y, el: s.element, ttl: TRAIL_TURNS });
   }
-  if (s.companion) s.ricky = isIndoor(s.area, s.pos.x + dx * n, s.pos.y + dy * n) ? undefined : { x: s.pos.x + dx * (n - 1), y: s.pos.y + dy * (n - 1) };
+  follow(s, isIndoor(s.area, s.pos.x + dx * n, s.pos.y + dy * n) ? undefined : { x: s.pos.x + dx * (n - 1), y: s.pos.y + dy * (n - 1) }, { x: s.pos.x + dx * n, y: s.pos.y + dy * n });
   s.pos = { x: s.pos.x + dx * n, y: s.pos.y + dy * n };
   s.steps += n;
   say(s, `You dash, leaving ${s.element === "universal" ? "light" : s.element} in your wake.`);
@@ -1412,6 +1473,11 @@ function startFight(s: State, e: Entity) {
   s.mode = "battle";
   s.battle = { enemyId: e.id, kind, hp: e.hp ?? def.hp, maxHp: def.hp, guarding: false, burn: 0, stun: 0, intent: "strike", combo: 0, stagger: 0, broken: 0, last: { hero: "idle", foe: "idle" }, turn: 0 };
   say(s, def.taunt);
+  // A horse close by now and then lashes out at whatever has come for its rider (not at a boss).
+  if (s.companion === "horse" && s.horse && kind !== "bigslime" && roll(s) < 0.35) {
+    s.battle.hp = Math.max(1, s.battle.hp - 4);
+    say(s, `${s.horse.name} wheels round and kicks it. The ${def.name} loses 4 HP.`);
+  }
   chooseIntent(s, s.battle);
 }
 
@@ -1698,6 +1764,13 @@ function awaken(s: State) {
 // ---------------------------------------------------------------------------------------- saving
 
 // Whether a saved game is one this version can still read.
+// A game saved before some people or things were added to an area has none of them: bring in whatever is missing (by its id).
+export function withNewThings(s: State): State {
+  const have = new Set(s.entities.map((e) => e.id));
+  const more = AREA_IDS.flatMap((a) => parseArea(a).entities.filter((e) => !have.has(e.id)).map((e) => ({ ...e })));
+  return more.length ? { ...s, entities: [...s.entities, ...more] } : s;
+}
+
 export function isState(v: unknown): v is State {
   const s = v as State | null;
   return (

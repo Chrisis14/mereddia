@@ -8,7 +8,8 @@ import { grid as cavesGrid } from "./maps/Caves.grid";
 import { grid as templeGrid } from "./maps/The_Temple.grid";
 import { grid as treehouseGrid } from "./maps/treehouse.grid";
 import { grid as finaleGrid } from "./maps/The_Temple_Finale.grid";
-import { grid as dresdenGrid } from "./maps/Village_I_forgor.grid";
+import { grid as dresdenGrid } from "./maps/Dresden.grid";
+import { TOWNSFOLK } from "./town";
 import { grid as spikesGrid } from "./maps/Spike_Trap.grid";
 
 export type Dir = "up" | "down" | "left" | "right";
@@ -48,6 +49,8 @@ export type Entity = {
   src?: string;
   // What a sign says.
   text?: string;
+  // Which way a person stands, when it is not the way the map's art faces.
+  face?: Dir;
 };
 
 // ---------------------------------------------------------------------------------------- enemies
@@ -133,10 +136,11 @@ export const QUESTS: Quest[] = [
 
 // ---------------------------------------------------------------------------------------- loot
 
-export type Loot = { potion?: number; gold?: number; shield?: number };
+export type Loot = { potion?: number; gold?: number; shield?: number; weapon?: WeaponId };
 export const CHESTS: Record<string, { loot: Loot; text: string }> = {
   stash: { loot: { potion: 1, gold: 8 }, text: "A traveller's stash: a potion and a few coins. Someone didn't make it out." },
   altar: { loot: { shield: 1, potion: 2, gold: 20 }, text: "A round shield, two potions and a purse of coins. The altar's secret." },
+  mal_bow: { loot: { weapon: "bow", gold: 5 }, text: "Under an old blanket, a hunter's bow, still strung, and a few coins your father forgot he hid. Hunter's Bow added to your weapons." },
 };
 
 // What a smashed pot gives back. Most are empty; that is the point.
@@ -379,7 +383,7 @@ export const AREAS: Record<AreaId, AreaDef> = {
       // field on that side (two cells deep, so a dash cannot jump it), not just the one cell where the path crosses it.
       ...edgeBand(fieldGrid.rows, "west", (y) => ({ ...exit("caves", 40, 40, "go_caves"), y })),
       // Dresden: "no reason to go there at this time", until the story brings you back.
-      ...edgeBand(fieldGrid.rows, "east", () => ({ kind: "exit", what: "edge_east", ask: "edge_east", to: { area: "dresden", x: 1, y: 19 } })),
+      ...edgeBand(fieldGrid.rows, "east", () => ({ kind: "exit", what: "edge_east", ask: "edge_east", to: { area: "dresden", ...dresdenGrid.spots.arrive } })),
       ...edgeBand(fieldGrid.rows, "north", () => ({ kind: "exit", what: "edge_north", ask: "edge_north" })),
     ],
   },
@@ -466,9 +470,26 @@ export const AREAS: Record<AreaId, AreaDef> = {
     theme: "field",
     rows: dresdenGrid.rows,
     sym: {},
-    arrive: { x: 18, y: 19 },
-    map3d: { name: "Village I forgor", x0: dresdenGrid.x0, y0: dresdenGrid.y0 },
-    extra: [{ x: 0, y: 19, ...exit("field", 57, 32) }],
+    arrive: dresdenGrid.spots.arrive,
+    map3d: { name: "Dresden", x0: dresdenGrid.x0, y0: dresdenGrid.y0, summer: true },
+    zones: dresdenGrid.zones,
+    // The west end of the road in is the way back out to the field.
+    extra: [
+      ...[84, 85, 86].map((y) => ({ x: 0, y, ...exit("field", 57, 32) })),
+      // The people of the town stand where the town's plan puts them.
+      ...TOWNSFOLK.map((t) => {
+        const at = dresdenGrid.spots[t.spot];
+        if (!at) throw new Error(`Dresden has no spot called ${t.spot} (for ${t.id})`);
+        return { x: at.x, y: at.y, kind: "npc" as const, what: `town:${t.id}`, ...(t.face ? { face: t.face } : {}) };
+      }),
+      // The horse trader's horses in the paddock.
+      ...(["paddock1:chestnut:left", "paddock2:grey:down", "paddock3:black:right"] as const).map((p) => {
+        const [spot, coat, face] = p.split(":");
+        return { x: dresdenGrid.spots[spot].x, y: dresdenGrid.spots[spot].y, kind: "npc" as const, what: `horse:${coat}`, face: face as Dir };
+      }),
+      // The old chest in Mallakoth's parents' house.
+      { x: dresdenGrid.spots.mal_chest.x, y: dresdenGrid.spots.mal_chest.y, kind: "chest" as const, what: "mal_bow", src: `ptrn_chest@${dresdenGrid.spots.mal_chest.x},${dresdenGrid.spots.mal_chest.y}` },
+    ],
   },
   // A chamber whose floor is full of spikes. They rise a moment after you step in.
   spikes: {

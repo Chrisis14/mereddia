@@ -42,10 +42,11 @@ import * as audio from "./audio";
 import { cuesFor, loopsFor } from "./cues";
 import { MiniMap, resetSeen } from "./MiniMap";
 import { CUTSCENES, type Aim, type Step } from "./cutscenes";
-import { act, attackOf, boulderTile, COMBO_MAX, DODGE_COST, type Intent, defenseOf, groundAt, isState, maxHp, maxMana, newGame, potionCap, slimesLeft, STAMINA_MAX, xpToNext, type Action, type Dir, type State } from "./engine";
+import { withNewThings, act, attackOf, boulderTile, COMBO_MAX, DODGE_COST, type Intent, defenseOf, groundAt, isState, maxHp, maxMana, newGame, potionCap, slimesLeft, STAMINA_MAX, xpToNext, type Action, type Dir, type State } from "./engine";
 import { NAMES, NODES, type Who } from "./story";
 import { carried } from "./inventory";
 import { ELEMENT_COLOR } from "./art";
+import { COATS } from "./looks";
 import type { EffectWant, Stage } from "./three/stage";
 import { AREAS, ELEMENTS, bound, isIndoor, zoneAt, ENEMIES, QUESTS, SPELLS, WEAPONS, SPECIAL_MAX, sizeOf, type EnemyKind } from "./world";
 
@@ -58,7 +59,7 @@ const SAVE = "mereddia:save";
 function load(): State {
   try {
     const saved = JSON.parse(localStorage.getItem(SAVE) ?? "null");
-    if (isState(saved)) return saved;
+    if (isState(saved)) return withNewThings(saved);
   } catch {
     // No storage, or something that isn't ours: start fresh.
   }
@@ -134,7 +135,8 @@ function Hud({ s, dispatch }: { s: State; dispatch: (a: Action) => void }) {
           </span>
         )}
         {s.poisoned && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-caption text-destructive">Poisoned · no regeneration</span>}
-        {s.companion && <span className="rounded-full bg-muted px-2 py-0.5 text-caption">Ricky the Chest</span>}
+        {s.companion === "ricky" && <span className="rounded-full bg-muted px-2 py-0.5 text-caption">Ricky the Chest</span>}
+        {s.companion === "horse" && s.horse && <span className="rounded-full bg-muted px-2 py-0.5 text-caption">{s.horse.name} the {COATS[s.horse.coat]?.name.toLowerCase() ?? "bay"} horse</span>}
         {s.flags.blade && (
           <span className="rounded-full bg-muted px-2 py-0.5 text-caption tabular-nums" aria-label={`Flame Strike charge ${s.special} of ${SPECIAL_MAX}`}>
             Flame {s.special}/{SPECIAL_MAX}
@@ -188,7 +190,7 @@ function MapView({ s }: { s: State }) {
           <Boulder className="size-full scale-125" />
         </div>
       )}
-      {s.ricky && s.companion && !def.indoor && (
+      {s.ricky && s.companion === "ricky" && !def.indoor && (
         <div className="absolute transition-[left,top] duration-150 motion-reduce:transition-none" style={place(s.ricky.x, s.ricky.y)}>
           <Ricky className="size-full p-[10%]" />
         </div>
@@ -234,13 +236,14 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
   const doorsArea = useRef<string | undefined>(undefined);
   const slabSeen = useRef(new Map<string, number>());
   const opening = useRef(new Set<string>());
+  const chestsLifted = useRef(new Set<string>());
   const [over, setOver] = useState<Over>(CLEAR);
   const skip = useRef<() => void>(() => {});
 
   const apply = useCallback(async () => {
     const st = stage.current;
     if (!st) return;
-    const { desired, world, ROT, CHARACTER_SCALE } = await import("./three/bind");
+    const { desired, world, ROT, CHARACTER_SCALE, HORSE_SCALE } = await import("./three/bind");
     const cur = latest.current;
     const d = AREAS[cur.area].map3d!;
     const list = desired(cur.entities.filter((e) => e.area === cur.area && !(e.kind === "panel" && e.open)), d.x0, d.y0);
@@ -266,7 +269,8 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
       ...(cur.act ? { shot: cur.act } : {}),
     });
     if (cur.area === "finale") for (const c of FINALE_CAST) list.push({ key: `cast:${c.who}`, kind: "characters", name: c.name, ...world(c.x, c.y, d.x0, d.y0), rotY: c.rotY, scale: CHARACTER_SCALE, ...(c.anim ? { anim: c.anim } : {}) });
-    if (cur.ricky && cur.companion && !AREAS[cur.area].indoor) list.push({ key: "ricky", kind: "characters", name: "rikycharacter1", ...world(cur.ricky.x, cur.ricky.y, d.x0, d.y0), rotY: 0, scale: CHARACTER_SCALE });
+    if (cur.companion === "horse" && cur.horse?.at && !AREAS[cur.area].indoor) list.push({ key: "horse", kind: "characters", name: `Horse~${cur.horse.coat}`, ...world(cur.horse.at.x, cur.horse.at.y, d.x0, d.y0), rotY: ROT[cur.horse.face], scale: HORSE_SCALE, xray: true });
+    if (cur.ricky && cur.companion === "ricky" && !AREAS[cur.area].indoor) list.push({ key: "ricky", kind: "characters", name: "rikycharacter1", ...world(cur.ricky.x, cur.ricky.y, d.x0, d.y0), rotY: 0, scale: CHARACTER_SCALE });
     // The pigeon: on the old tree's branch until it's felled, then on Mallakoth's head if it chose to stay.
     const tree = cur.entities.find((e) => e.area === cur.area && e.kind === "prop" && e.what === "tree");
     // The four flame pillars the golem's waking lights (the project puts them on the tiles named torch1 to torch4) stay for the whole fight, and
@@ -365,6 +369,8 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
     for (const b of bound(cur.area)) if (b.dynamic || !present.has(b.id)) for (const k of b.src.split("|")) if (!opening.current.has(k)) hide.add(k);
     // The rock the pickaxe was in crumbles to rubble once it has been struck down.
     if (cur.area === "caves" && cur.items.pickaxe && !cur.entities.some((e) => e.what === "rock" || e.what === "pickrock")) st.playScenery(["boulder@-3,8"], "break");
+    // A chest that has been opened lifts its lid, once.
+    for (const e of cur.entities) if (e.area === cur.area && e.kind === "chest" && e.done && e.src && !chestsLifted.current.has(e.id)) { chestsLifted.current.add(e.id); st.playScenery(e.src.split("|"), "open"); }
     // The plate he stands on sinks.
     st.setPressed(`Pressure_plate@${cur.pos.x + d.x0},${cur.pos.y + d.y0}`);
     if (cur.area === "finale") for (const k of ["Wilfred_tuah@-3,-18", "Vastios_Threea@-2,-18", "Secret Master@-22,-13", "rikycharcter2@-3,-26", "rikycharacter1@-19,-9"]) hide.add(k);
@@ -387,7 +393,7 @@ function MapView3D({ s, scene, onDone }: { s: State; scene?: { id: string; n: nu
     if (cur.items.axe) hide.add("axe@-2,-1");
     // The boulder is drawn from the rules, wherever it is; the one the map placed always goes.
     hide.add("Boulder@-29,6");
-    if (cur.companion) hide.add("rikycharacter1@-19,-9");
+    if (cur.companion === "ricky") hide.add("rikycharacter1@-19,-9");
     st.setHidden(hide);
     // The spikes rise as the trap's timer runs out, and stay up once it has done its work.
     if (cur.area === "spikes") st.setTileFrame("wooden_floor_with_trap", cur.mode === "lost" ? 1 : cur.spike ? 1 - cur.spike.left / cur.spike.total : 0);
@@ -758,11 +764,19 @@ function Inventory({ s, dispatch, open, onOpenChange }: { s: State; dispatch: (a
               </ul>
             </section>
           )}
-          {s.companion && (
+          {s.companion === "ricky" && (
             <section aria-label="Companion">
               <h3 className="mb-1.5 font-display text-heading">Companion</h3>
               <ul className="flex flex-col gap-1.5">
                 <Row icon={<Ricky className="size-7" />} name="Ricky the Chest" text="Follows you everywhere except into buildings, and carries your spare potions (the pack holds up to 10)." />
+              </ul>
+            </section>
+          )}
+          {s.companion === "horse" && s.horse && (
+            <section aria-label="Companion">
+              <h3 className="mb-1.5 font-display text-heading">Companion</h3>
+              <ul className="flex flex-col gap-1.5">
+                <Row icon={<SparkleIcon size={24} weight="fill" />} name={`${s.horse.name} · ${COATS[s.horse.coat]?.name ?? "Bay"} horse`} text="Quicker than walking. Follows you outdoors (not into buildings) and now and then kicks what comes for you." />
               </ul>
             </section>
           )}
@@ -963,13 +977,41 @@ function KeyCap({ keys }: { keys: string }) {
   );
 }
 
+// A line of text to type (a horse's name), with a button to confirm it.
+function NameInput({ label, onDone }: { label: string; onDone: (text: string) => void }) {
+  const [text, setText] = useState("");
+  return (
+    <form
+      className="flex flex-col gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onDone(text);
+      }}
+    >
+      <input
+        autoFocus
+        aria-label={label}
+        placeholder={label}
+        maxLength={16}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="h-12 rounded-lg border bg-card px-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      />
+      <Button size="lg" type="submit">
+        Name it
+        <KeyCap keys="Enter" />
+      </Button>
+    </form>
+  );
+}
+
 function DialogueView({ s, dispatch }: { s: State; dispatch: (a: Action) => void }) {
   const d = s.dlg!;
   const node = NODES[d.node];
   if (!node) return null;
   const text = d.text ?? (typeof node.text === "function" ? node.text(s) : node.text);
   const choices = typeof node.choices === "function" ? node.choices(s) : (node.choices ?? []);
-  const speaker = NAMES[node.who];
+  const speaker = node.name ?? NAMES[node.who];
   return (
     <div className="flex max-h-[46dvh] flex-col gap-2 overflow-y-auto md:max-h-none landscape:max-h-none">
       <section aria-label={speaker ? `${speaker} speaking` : "Story"} className="flex items-start gap-3 rounded-lg bg-card p-3">
@@ -979,7 +1021,9 @@ function DialogueView({ s, dispatch }: { s: State; dispatch: (a: Action) => void
           <p className={cn("whitespace-pre-line text-body", (node.who === "narrator" || node.who === "note") && "text-callout")}>{text}</p>
         </div>
       </section>
-      {choices.length ? (
+      {node.input ? (
+        <NameInput label={node.input.label} onDone={(text) => dispatch({ type: "input", text })} />
+      ) : choices.length ? (
         <div className="flex flex-col gap-1.5">
           {choices.map((c, i) => (
             <Button key={i} size="lg" variant={i === 0 ? "default" : "secondary"} className="h-auto min-h-12 whitespace-normal py-2" onClick={() => dispatch({ type: "choose", i })}>
@@ -1164,7 +1208,7 @@ export function MereddiaGame() {
       h.tick = 0;
       if (h.timer === undefined) {
         stepHeld();
-        h.timer = window.setInterval(stepHeld, STEP_MS);
+        h.timer = window.setInterval(stepHeld, latest.current.companion === "horse" ? STEP_MS * 0.72 : STEP_MS);
       }
     },
     [stepHeld],

@@ -72,3 +72,11 @@ It is a little picture in each frame's palette: purples on a pale mauve ground, 
 like the trim. In the game (`flameOf()` in `three/models.ts`) the purples slide along their rows a few pixels and back while the wearer is doing something,
 so the light, middle and dark purples keep the proportions they were drawn in. Slimes, the boulder and the golem are left out.
 
+
+## Dresden
+
+The project's own Dresden (`Village I forgor`) is an empty meadow, so `node tools/mereddia/dresden.mjs` builds the fortress town from the project's tiles and
+objects: curtain walls with corner and gate towers, a church and plaza in the middle, four districts, the prison, Mallakoth's house, the market, and a horse
+paddock outside the south gate. It writes `public/mereddia/3d/maps/Dresden.json` and `src/game/maps/Dresden.grid.ts` (the walkable rows, the buildings that
+count as indoors, and named spots where people stand; `town.ts` says who stands at which). The horse is the project's `characters/Horse`, split into body and legs
+when it loads so the legs can swing; its colours and the townspeople's clothes are repainted palettes (`looks.ts`, `three/models.ts`).

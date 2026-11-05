@@ -1418,7 +1418,7 @@ describe("the spiked floor and the road to Dresden", () => {
     const road = act(at("field", 59, 32, { flags: { epilogue: true } }), mv("right"));
     expect(road.dlg?.node).toBe("go_dresden");
     expect(act(road, choose(0)).area).toBe("dresden");
-    const back = act(at("dresden", 1, 19), mv("left"));
+    const back = act(at("dresden", 1, 85), mv("left"));
     expect(back.area).toBe("field");
   });
 });

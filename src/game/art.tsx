@@ -21,6 +21,7 @@ export const HEAD: Record<Who, string | undefined> = {
   clavicus: undefined,
   joshua: undefined,
   ricky: undefined,
+  town: undefined,
 };
 
 export const ITEM = {

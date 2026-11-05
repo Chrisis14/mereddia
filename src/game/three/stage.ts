@@ -158,10 +158,32 @@ export class Actor {
   heldPick?: THREE.Object3D;
   // The letter in his hand while he burns it: the project's lined sheet of paper (note2), which has its own burning animation.
   letter?: { grip: THREE.Object3D; paper: Actor };
+  // A horse's legs, hung from its hips, and how far into its stride it is.
+  private legs: { pivot: THREE.Group; phase: number }[] = [];
+  private stride = 0;
+  private swing = 0;
   constructor(readonly model: Model, material: THREE.Material) {
     this.mesh = new THREE.Mesh(model.frames[0], material);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
+    for (const leg of model.rig?.legs ?? []) {
+      const pivot = new THREE.Group();
+      pivot.position.set(...leg.pivot);
+      const part = new THREE.Mesh(leg.geometry, material);
+      part.castShadow = true;
+      part.receiveShadow = true;
+      pivot.add(part);
+      this.mesh.add(pivot);
+      this.legs.push({ pivot, phase: leg.phase });
+    }
+  }
+  // The gait of a model with legs of its own: they swing in step while it is moving and settle when it stops, and the body rises and falls with each stride.
+  gait(dt: number, moving: boolean) {
+    if (!this.legs.length) return;
+    this.swing += ((moving ? 1 : 0) - this.swing) * Math.min(1, dt * 10);
+    this.stride += dt * 11;
+    for (const l of this.legs) l.pivot.rotation.z = Math.sin(this.stride + l.phase) * 0.62 * this.swing;
+    this.mesh.position.y += Math.abs(Math.sin(this.stride)) * 0.045 * this.swing;
   }
   play(name: string) {
     if (this.model.animations[name]) {
@@ -917,12 +939,13 @@ export class Stage {
         if (l.speed) l.actor.mesh.position.y += Math.sin(performance.now() / 1000 * 11) * (d.kind === "objects" ? 0 : 0.04);
         // Paper flutters a little from side to side as it falls.
         if (l.speed && d.kind === "objects") l.actor.mesh.position.x += Math.sin(performance.now() / 1000 * 9) * 0.04;
-        l.actor.mesh.rotation.y = l.rot;
+        l.actor.mesh.rotation.y = l.rot + (l.actor.model.rig?.yaw ?? 0);
         // Walking carries on for a moment after the last step, so holding a key is one smooth walk, not a stutter.
         l.moving = dist > 0.04 ? 0.18 : Math.max(0, (l.moving ?? 0) - dt);
         const walk = d.moveAnim && l.actor.model.animations[d.moveAnim] ? d.moveAnim : "walk";
         const want = d.anim ?? (l.moving > 0 && l.actor.model.animations[walk] ? walk : (d.restAnim ?? "idle"));
         l.actor.play(want);
+        l.actor.gait(dt, l.moving > 0);
         if (d.shot && d.shot.n !== l.shotN) {
           // The first time we see a gesture count, remember it without playing: it's old news.
           if (l.shotN !== undefined) {

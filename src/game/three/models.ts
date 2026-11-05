@@ -1,10 +1,14 @@
 import * as THREE from "three";
+import { BODIES, COATS, LOOKS } from "../looks";
 
 // Loads the voxel models tools/mereddia/convert.mjs wrote: one geometry per animation frame, the colours
 // already baked into the vertices, plus the project's animation table.
 
 export type Anim = { start: number; end: number; speed: number; type: number; sound_effect?: string | null; positional_sound?: boolean };
-export type Model = { name: string; kind: string; frames: THREE.BufferGeometry[]; animations: Record<string, Anim>; material: THREE.Material; passable?: boolean; flame?: Flame; hands?: ([number, number, number] | null)[]; handsL?: ([number, number, number] | null)[]; tops?: number[] };
+export type Model = { name: string; kind: string; frames: THREE.BufferGeometry[]; animations: Record<string, Anim>; material: THREE.Material; passable?: boolean; flame?: Flame; hands?: ([number, number, number] | null)[]; handsL?: ([number, number, number] | null)[]; tops?: number[]; rig?: Rig };
+
+// A horse is one mesh in the project, so the loader cuts its four legs out of it (each hung from the hip) for the game to swing as it walks.
+export type Rig = { legs: { geometry: THREE.BufferGeometry; pivot: [number, number, number]; phase: number }[]; yaw: number };
 
 // The flame on a robe's back, shown by moving its colours around: along every row of the palette the purples slide over a few pixels and back, so
 // the light, middle and dark purples stay in the same proportions as they were drawn, just shifting about. It runs while its wearer is doing
@@ -110,18 +114,113 @@ async function textureOf(url: string): Promise<THREE.Texture> {
   return tex;
 }
 
+// A model asked for as "Steven~baker" is the body Steven repainted as the look "baker" (see looks.ts); "Horse~chestnut" is the horse in that coat.
+const hex = (h: string): [number, number, number] => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const shade = (h: string, f: number) => hex(h).map((v) => Math.max(0, Math.min(255, Math.round(v * f)))) as [number, number, number];
+
+// The colour swaps for a look: palette entry (as an exact colour) to its replacement.
+function swapsFor(base: string, look: string): Map<number, [number, number, number]> | null {
+  const swaps = new Map<number, [number, number, number]>();
+  const set = (from: string, to: [number, number, number]) => swaps.set((hex(from)[0] << 16) | (hex(from)[1] << 8) | hex(from)[2], to);
+  if (base === "Horse" || base === "Other_Horse") {
+    const coat = COATS[look];
+    if (!coat) return null;
+    set("#4d291a", hex(coat.body));
+    set("#000000", hex(coat.points));
+    return swaps;
+  }
+  const l = LOOKS[look];
+  const b = BODIES[base];
+  if (!l || !b) return null;
+  const robe = l.robe ?? b.robe;
+  set(b.robe, hex(robe));
+  if (l.hair) set(b.hair, hex(l.hair));
+  if (l.skin) set(b.skin, hex(l.skin));
+  if (l.pants) set(b.pants, hex(l.pants));
+  if (l.boots) set(b.boots, hex(l.boots));
+  if (l.trim) set(b.trim, hex(l.trim));
+  // The Order's flame, its gold frame and its ground become plain cloth.
+  b.plain.forEach((c, i) => set(c, shade(robe, i % 2 ? 0.88 : 0.95)));
+  return swaps;
+}
+
+async function repainted(url: string, swaps: Map<number, [number, number, number]>): Promise<THREE.Texture> {
+  const bmp = await createImageBitmap(await (await fetch(url)).blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  const cv = document.createElement("canvas");
+  cv.width = bmp.width;
+  cv.height = bmp.height;
+  const g = cv.getContext("2d", { willReadFrequently: true })!;
+  g.drawImage(bmp, 0, 0);
+  const img = g.getImageData(0, 0, cv.width, cv.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] !== 255) continue;
+    const to = swaps.get((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
+    if (to) [d[i], d[i + 1], d[i + 2]] = to;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Cuts the legs out of a horse's geometry: triangles low down are legs; front or back by which side of the middle (the head is towards +x),
+// and left or right by which side of the body's centre line. The rest stays as the body. Trotting swings opposite corners together.
+function splitHorse(geometry: THREE.BufferGeometry): { body: THREE.BufferGeometry; rig: Rig } {
+  const pos = geometry.getAttribute("position");
+  const uv = geometry.getAttribute("uv");
+  const nor = geometry.getAttribute("normal");
+  const LEG_TOP = 0.56;
+  geometry.computeBoundingBox();
+  const zMid = (geometry.boundingBox!.min.z + geometry.boundingBox!.max.z) / 2;
+  const parts: { p: number[]; u: number[]; n: number[]; sum: [number, number, number]; count: number }[] = Array.from({ length: 5 }, () => ({ p: [], u: [], n: [], sum: [0, 0, 0], count: 0 }));
+  for (let t = 0; t < pos.count; t += 3) {
+    let cx = 0, cy = 0, cz = 0;
+    for (let k = 0; k < 3; k++) { cx += pos.getX(t + k) / 3; cy += pos.getY(t + k) / 3; cz += pos.getZ(t + k) / 3; }
+    // 0 body, 1 front left, 2 front right, 3 rear left, 4 rear right
+    const which = cy >= LEG_TOP ? 0 : (cx > 0 ? 1 : 3) + (cz > zMid ? 1 : 0);
+    const part = parts[which];
+    for (let k = 0; k < 3; k++) {
+      part.p.push(pos.getX(t + k), pos.getY(t + k), pos.getZ(t + k));
+      part.u.push(uv.getX(t + k), uv.getY(t + k));
+      part.n.push(nor.getX(t + k), nor.getY(t + k), nor.getZ(t + k));
+    }
+    part.sum[0] += cx; part.sum[2] += cz; part.count++;
+  }
+  const build = (p: (typeof parts)[number], shift?: [number, number, number]) => {
+    const g = new THREE.BufferGeometry();
+    const arr = shift ? p.p.map((v, i) => v - shift[i % 3]) : p.p;
+    g.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(p.u, 2));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(p.n, 3));
+    return g;
+  };
+  const legs = parts.slice(1).map((p, i) => {
+    const pivot: [number, number, number] = [p.sum[0] / Math.max(1, p.count), LEG_TOP, p.sum[2] / Math.max(1, p.count)];
+    // Diagonal pairs move together: front left with rear right.
+    return { geometry: build(p, pivot), pivot, phase: i === 0 || i === 3 ? 0 : Math.PI };
+  });
+  return { body: build(parts[0]), rig: { legs, yaw: -Math.PI / 2 } };
+}
+
 export function loadModel(kind: string, name: string): Promise<Model | null> {
   const key = `${kind}/${name}`;
   let hit = cache.get(key);
   if (!hit) {
     hit = (async () => {
       try {
-        const dir = `${BASE}/models/${kind}/${slug(name)}`;
+        const [fileName, look] = name.split("~");
+        const dir = `${BASE}/models/${kind}/${slug(fileName)}`;
         const [json, bin] = await Promise.all([fetch(`${dir}.json`).then((r) => r.json() as Promise<Raw>), fetch(`${dir}.bin`).then((r) => r.arrayBuffer())]);
-        let map = json.texture ? await textureOf(`${dir}.png`) : undefined;
+        const swaps = look ? swapsFor(fileName, look) : null;
+        let map = json.texture ? (swaps ? await repainted(`${dir}.png`, swaps) : await textureOf(`${dir}.png`)) : undefined;
         // People who wear the flame and move about have it flicker; slimes and the like do not.
         let flame: Flame | undefined;
-        if (map && kind === "characters" && json.frames.length > 1 && !/slime|Boulder|Golem/i.test(name)) {
+        if (map && !look && kind === "characters" && json.frames.length > 1 && !/slime|Boulder|Golem/i.test(name)) {
           const made = flameOf(map.image as ImageBitmap);
           if (made) {
             flame = made.flame;
@@ -144,10 +243,16 @@ export function loadModel(kind: string, name: string): Promise<Model | null> {
         });
         // Glass (the air crystals) is drawn see-through; everything else is solid with cut-out edges.
         const material = json.translucent ? new THREE.MeshLambertMaterial({ map, transparent: true, alphaTest: 0.02, depthWrite: false }) : new THREE.MeshLambertMaterial({ map, alphaTest: 0.5 });
+        let rig: Rig | undefined;
+        if (/^(Other_)?Horse$/.test(fileName) && frames.length === 1) {
+          const cut = splitHorse(frames[0]);
+          frames[0] = cut.body;
+          rig = cut.rig;
+        }
         const hands = json.frames.some((f) => f.hand) ? json.frames.map((f) => f.hand ?? null) : undefined;
         const tops = json.frames.some((f) => f.top !== undefined) ? json.frames.map((f) => f.top ?? 0) : undefined;
         const handsL = json.frames.some((f) => f.handL) ? json.frames.map((f) => f.handL ?? null) : undefined;
-        return { name: json.name, kind: json.kind, frames, animations: json.meta.animations ?? {}, material, passable: json.meta.passable, flame, hands, handsL, tops };
+        return { name: json.name, kind: json.kind, frames, animations: json.meta.animations ?? {}, material, passable: json.meta.passable, flame, hands, handsL, tops, rig };
       } catch (error) {
         console.error("Mereddia model failed to load:", key, error);
         return null;

@@ -1,4 +1,5 @@
 import type { Entity, Dir } from "../world";
+import { townsperson } from "../town";
 import { TILE, type Desired } from "./stage";
 
 // Which of the project's models stands for each thing in the game rules, and where it stands in 3D.
@@ -14,8 +15,14 @@ export function modelFor(e: Entity): Ref | null {
     case "enemy":
       if (e.what === "golem") return { kind: "characters", name: "Golem" };
       return { kind: "characters", name: e.what === "bigslime" ? "Boss_slime" : `${e.what}_slime` };
-    case "npc":
+    case "npc": {
+      if (e.what.startsWith("horse:")) return { kind: "characters", name: `Horse~${e.what.slice(6)}` };
+      if (e.what.startsWith("town:")) {
+        const t = townsperson(e.what.slice(5));
+        return t ? { kind: "characters", name: `${t.body ?? "Steven"}~${t.look}` } : null;
+      }
       return NPC[e.what] ? { kind: "characters", name: NPC[e.what] } : null;
+    }
     default:
       return null;
   }
@@ -28,6 +35,7 @@ export const ROT: Record<Dir, number> = { down: 0, up: Math.PI, right: Math.PI /
 export const world = (x: number, y: number, x0: number, y0: number) => ({ x: (x + x0) * TILE + TILE / 2, z: (y + y0) * TILE + TILE / 2 });
 
 export const CHARACTER_SCALE = 0.85;
+export const HORSE_SCALE = 1.12;
 
 export function desired(entities: Entity[], x0: number, y0: number): Desired[] {
   const out: Desired[] = [];
@@ -35,7 +43,7 @@ export function desired(entities: Entity[], x0: number, y0: number): Desired[] {
     const m = modelFor(e);
     if (!m) continue;
     const w = world(e.x, e.y, x0, y0);
-    out.push({ key: e.id, ...m, ...w, rotY: e.kind === "npc" || e.kind === "enemy" ? 0 : Math.PI, scale: m.kind === "characters" ? CHARACTER_SCALE : 1 });
+    out.push({ key: e.id, ...m, ...w, rotY: e.face ? ROT[e.face] : e.kind === "npc" || e.kind === "enemy" ? 0 : Math.PI, scale: m.name.startsWith("Horse~") ? HORSE_SCALE : m.kind === "characters" ? CHARACTER_SCALE : 1 });
   }
   return out;
 }

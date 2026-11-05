@@ -1,4 +1,6 @@
 import type { State } from "./engine";
+import { TOWNSFOLK } from "./town";
+import { COATS, COAT_IDS } from "./looks";
 
 // Journey Across Mereddia's talking: every conversation as a small graph of nodes. A node says who
 // speaks, what they say, where it goes next (or what the player can answer), and may run an effect
@@ -7,7 +9,7 @@ import type { State } from "./engine";
 // The lines come from the project's own dialogue and lore files. A few places had nothing written yet, and have short lines of their own:
 // the road north in the field, the dead Keeper, Vastios before the trial and at the oath, and the robes.
 
-export type Who = "narrator" | "note" | "mallakoth" | "vastios" | "wilfred" | "drawf" | "master" | "stefan" | "alexis" | "clavicus" | "joshua" | "ricky";
+export type Who = "narrator" | "note" | "mallakoth" | "vastios" | "wilfred" | "drawf" | "master" | "stefan" | "alexis" | "clavicus" | "joshua" | "ricky" | "town";
 
 export const NAMES: Record<Who, string> = {
   narrator: "",
@@ -22,6 +24,7 @@ export const NAMES: Record<Who, string> = {
   clavicus: "Clavicius",
   joshua: "Joshua",
   ricky: "Ricky",
+  town: "",
 };
 
 export type Choice = { label: string; to?: string; fx?: string };
@@ -34,6 +37,10 @@ export type Node = {
   fx?: string;
   // A cutscene to play before this node is shown. See cutscenes.ts.
   scene?: string;
+  // Who is speaking, when it is not one of the named people (the town's people).
+  name?: string;
+  // A line of text to type before going on (a horse's name): the effect it feeds, and what the box asks for.
+  input?: { fx: string; label: string };
 };
 
 const say = (who: Who, text: Node["text"], next?: string, extra: Partial<Node> = {}): Node => ({ who, text, next, ...extra });
@@ -338,4 +345,61 @@ export const NODES: Record<string, Node> = {
   },
   ch1_wait: say("narrator", "Well, I am not. You will have to wait a bit.", undefined, { fx: "win" }),
   ch1_not: say("narrator", "Updates soon. If you want to play some more, you can always start a new playthrough.", undefined, { fx: "win" }),
+};
+
+// ---------------------------------------------------------------------------------------- the people of Dresden
+// Each person's lines (town.ts), one node after another: "town:<id>:0", "town:<id>:1", ...
+for (const t of TOWNSFOLK) {
+  t.lines.forEach((line, i) => {
+    NODES[`town:${t.id}:${i}`] = say("town", line, i + 1 < t.lines.length ? `town:${t.id}:${i + 1}` : undefined, { name: t.name });
+  });
+}
+
+// ---------------------------------------------------------------------------------------- the horse trader
+// Outside the gate: five gold, a colour, a name.
+NODES.horse1 = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: "Horses! Fine horses, honest horses, five gold apiece. Cheap? It's cheap because I never learned to count. Take one, name it, and it'll carry you quicker than your own feet. It'll even kick things for you, now and then, if it likes you.",
+  choices: [
+    { label: "I'll take a horse. (5 gold)", to: "horse_buy" },
+    { label: "Tell me about them.", to: "horse_about" },
+    { label: "Not now." },
+  ],
+};
+NODES.horse_about = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: "Gentle ones, mostly. Bay, chestnut, black, grey, white, palomino, dun: pick any colour, it's the same horse underneath. They keep up with you, they follow you everywhere outdoors, and they won't go into a building, because they have manners. One companion at a time, though. They get jealous.",
+  next: "horse1",
+};
+NODES.horse_buy = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: (s) => (s.gold >= 5 ? "Five gold. A fair price. What colour?" : "Five gold, friend. Not four and a half. Come back when you've got it."),
+  choices: (s) =>
+    s.gold >= 5
+      ? [...COAT_IDS.map((id) => ({ label: COATS[id].name, to: "horse_name", fx: `horseCoat:${id}` })), { label: "Actually, not now." }]
+      : [{ label: "I'll be back." }],
+};
+NODES.horse_name = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: (s) => `A ${COATS[s.horseDraft ?? "bay"]?.name.toLowerCase() ?? "bay"} one, then. What will you call it?`,
+  input: { fx: "nameHorse", label: "Name your horse" },
+  next: "horse_done",
+};
+NODES.horse_done = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: (s) => `${s.horse?.name ?? "The horse"}! Good name. Treat it well and it'll be yours till the stars go out. If you've a chest on four legs following you about, send it home. It's one companion at a time.`,
+};
+NODES.horse_have = {
+  who: "town",
+  name: "Hob the Horse Trader",
+  text: (s) => `Back already? ${s.horse?.name ?? "Your horse"} looks well. Keep it fed and out of buildings.`,
+};
+NODES.horse_look = {
+  who: "narrator",
+  text: "One of Hob's horses. It looks at you the way a horse does, as if it knows exactly what it is worth and what you owe it.",
 };
