@@ -9,10 +9,10 @@ const at = (x: number, y: number, extra: Partial<State> = {}): State => ({ ...ne
 describe("the companion slot", () => {
   const owned = (extra: Partial<State> = {}) => at(30, 24, { flags: { rickyOwned: true }, facing: "right", ...extra });
 
-  it("puts Ricky down on the tile in front of him when he is equipped, and takes him away again", () => {
+  it("puts Ricky down just behind him when he is equipped, and takes him away again", () => {
     let s = act(owned(), { type: "companion", who: "ricky" });
     expect(s.companion).toBe("ricky");
-    expect(s.ricky).toEqual({ x: 31, y: 24 });
+    expect(s.ricky).toEqual({ x: 29, y: 24 });
     expect(s.log.at(-1)).toBe("Ricky has successfully spawned in.");
     const sounds = cuesFor(owned(), s).map((c) => c.name);
     expect(sounds).toContain("Ricky_Spawn");
@@ -41,6 +41,31 @@ describe("the companion slot", () => {
     expect(s.companion).toBe("ricky");
     expect(s.horse?.at).toBeUndefined();
     expect(s.bag?.gold).toBe(5);
+  });
+});
+
+describe("following", () => {
+  it("keeps Ricky three steps behind, never ahead and never close enough to run into", () => {
+    let s = act(at(30, 24, { flags: { rickyOwned: true }, facing: "right" }), { type: "companion", who: "ricky" });
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    const route: Dir[] = ["right", "right", "right", "right", "up", "up", "up", "right", "right", "down", "down", "down", "down"];
+    const seen: number[] = [];
+    for (const d of route) {
+      s = act(s, mv(d));
+      seen.push(dist(s.pos, s.ricky!));
+    }
+    // From the very start he is at least two cells behind (never one: that is a bump), and once he has caught up, exactly three along the path.
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(2);
+    expect(seen.slice(4).every((n) => n >= 2 && n <= 3)).toBe(true);
+    expect(s.crumbs!.length).toBeGreaterThanOrEqual(3);
+    // He also never steps forward to where the hero is.
+    expect(s.ricky).not.toEqual(s.pos);
+  });
+
+  it("stays where he was if you go inside, and comes back out when you do", () => {
+    let s = act(at(30, 24, { flags: { rickyOwned: true }, facing: "right" }), { type: "companion", who: "ricky" });
+    s = act({ ...s, area: "dresden", pos: { x: 40, y: 60 } }, mv("up"));
+    expect(s.ricky).toBeTruthy();
   });
 });
 

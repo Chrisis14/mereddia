@@ -134,6 +134,8 @@ export type State = {
   bag?: Partial<Record<StashKey, number>>;
   // The screen the view should open (Ricky's chest), counted so a second bump opens it again; and how many times he has opened his mouth, for his animation.
   ui?: { open: "ricky"; n: number };
+  // The cells he has left, newest first: where whoever follows him walks.
+  crumbs?: { x: number; y: number }[];
   rickyAct?: number;
   // The coat chosen for a horse being bought, until it has a name and is paid for.
   horseDraft?: string;
@@ -200,11 +202,31 @@ const setPack = (s: State, k: StashKey, v: number) => {
 };
 
 // Whoever follows him comes to stand where he was.
-function follow(s: State, from: { x: number; y: number } | undefined, toward?: { x: number; y: number }) {
-  if (s.companion === "ricky") s.ricky = from;
-  if (s.companion === "horse" && s.horse) {
-    s.horse.at = from;
-    if (from && toward && (toward.x !== from.x || toward.y !== from.y)) s.horse.face = Math.abs(toward.x - from.x) >= Math.abs(toward.y - from.y) ? (toward.x > from.x ? "right" : "left") : toward.y > from.y ? "down" : "up";
+// Whoever follows him keeps a few steps behind, so he never walks into them: they stand on the cell he left three steps ago (staying put until he
+// has gone that far), and the cells he has left are kept in `crumbs`, newest first.
+export const FOLLOW_GAP = 3;
+type Cell = { x: number; y: number };
+const faceFrom = (a: Cell, b: Cell): Dir => (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? (b.x > a.x ? "right" : "left") : b.y > a.y ? "down" : "up");
+
+// `left`: the cells he has just left, oldest first; or undefined when he has gone somewhere they cannot follow (a building).
+function follow(s: State, left: Cell[] | undefined, fresh = false) {
+  if (!s.companion) return;
+  const put = (at: Cell | undefined) => {
+    if (s.companion === "ricky") s.ricky = at;
+    if (s.companion === "horse" && s.horse) s.horse.at = at;
+  };
+  if (!left) {
+    s.crumbs = [];
+    put(undefined);
+    return;
+  }
+  const had = s.companion === "ricky" ? s.ricky : s.horse?.at;
+  s.crumbs = fresh ? [...left].reverse() : [...[...left].reverse(), ...(s.crumbs ?? [])].slice(0, FOLLOW_GAP + 2);
+  const at = s.crumbs.length >= FOLLOW_GAP ? s.crumbs[FOLLOW_GAP - 1] : (had ?? s.crumbs.at(-1));
+  put(at && { ...at });
+  if (s.companion === "horse" && s.horse && at) {
+    const ahead = s.crumbs[FOLLOW_GAP - 2] ?? s.pos;
+    if (ahead.x !== at.x || ahead.y !== at.y) s.horse.face = faceFrom(at, ahead);
   }
 }
 
@@ -465,10 +487,12 @@ function setCompanion(s: State, who: "ricky" | "horse" | "none"): State {
   if (who === "ricky" && !s.flags.rickyOwned) return (say(s, "You do not have Ricky."), s);
   if (who === "horse" && !s.horse) return (say(s, "You do not have a horse."), s);
   if (isIndoor(s.area, s.pos.x, s.pos.y)) return (say(s, who === "ricky" ? "You cannot spawn Ricky inside a building." : "You cannot call a horse inside a building."), s);
+  // He appears just behind you (the project's script puts him in front, where you would walk straight into him), or at your feet if there is no room.
   const [dx, dy] = STEP[s.facing];
-  const fx = s.pos.x + dx;
-  const fy = s.pos.y + dy;
+  const fx = s.pos.x - dx;
+  const fy = s.pos.y - dy;
   const spot = passable(s, fx, fy) && !at(s, fx, fy).some(solid) ? { x: fx, y: fy } : { ...s.pos };
+  s.crumbs = [];
   delete s.ricky;
   if (s.horse) delete s.horse.at;
   s.companion = who;
@@ -662,6 +686,7 @@ function runFx(s: State, fx: string, ref?: string, text?: string) {
       if (s.companion === "ricky") delete s.ricky;
       s.companion = "horse";
       s.horse.at = { ...s.pos };
+      s.crumbs = [];
       s.flags.horseBought = true;
       say(s, `${name} is yours. A ${COATS[s.horse.coat].name.toLowerCase()}, and quicker than walking.`);
       break;
@@ -759,7 +784,7 @@ function go(s: State, to: Spot) {
   delete s.flags.rainy;
   s.stamina = Math.min(STAMINA_MAX, s.stamina + 2);
   s.zone = zoneAt(to.area, to.x, to.y)?.id;
-  follow(s, isIndoor(to.area, to.x, to.y) ? undefined : { ...s.pos });
+  follow(s, isIndoor(to.area, to.x, to.y) ? undefined : [{ ...s.pos }], true);
   if (fromSpikes && !s.flags.spikesDone) {
     s.flags.spikesDone = true;
     s.gold += 15;
@@ -842,8 +867,15 @@ function move(s: State, dir: Dir, sprint: boolean, keep = false): State {
       if (i === 0) spent = touch(s, block);
       break;
     }
-    follow(s, isIndoor(s.area, x, y) ? undefined : { ...s.pos }, { x, y });
+    const old = { ...s.pos };
+    follow(s, isIndoor(s.area, x, y) ? undefined : [old]);
     s.pos = { x, y };
+    // Walking onto whoever follows him (he had not got three steps away yet) swaps places, so they are never stacked.
+    const mate = s.companion === "ricky" ? s.ricky : s.companion === "horse" ? s.horse?.at : undefined;
+    if (mate && mate.x === x && mate.y === y) {
+      if (s.companion === "ricky") s.ricky = old;
+      else if (s.horse) s.horse.at = old;
+    }
     s.steps++;
     moved++;
     enterZone(s);
@@ -1546,7 +1578,7 @@ function dash(s: State): State {
     s.trails = s.trails.filter((t) => !(t.area === s.area && t.x === x && t.y === y));
     s.trails.push({ area: s.area, x, y, el: s.element, ttl: TRAIL_TURNS });
   }
-  follow(s, isIndoor(s.area, s.pos.x + dx * n, s.pos.y + dy * n) ? undefined : { x: s.pos.x + dx * (n - 1), y: s.pos.y + dy * (n - 1) }, { x: s.pos.x + dx * n, y: s.pos.y + dy * n });
+  follow(s, isIndoor(s.area, s.pos.x + dx * n, s.pos.y + dy * n) ? undefined : Array.from({ length: n }, (_, i) => ({ x: s.pos.x + dx * i, y: s.pos.y + dy * i })));
   s.pos = { x: s.pos.x + dx * n, y: s.pos.y + dy * n };
   s.steps += n;
   say(s, `You dash, leaving ${s.element === "universal" ? "light" : s.element} in your wake.`);

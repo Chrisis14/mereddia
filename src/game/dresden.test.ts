@@ -179,9 +179,10 @@ describe("the horse trader", () => {
     let s = buy(atVendor(), 0, "Ned");
     s = act(s, { type: "next" });
     s = { ...s, mode: "explore", dlg: undefined, pos: { x: 40, y: 70 }, facing: "up" };
-    const before = s.pos;
-    s = act(s, mv("up"));
-    expect(s.horse?.at).toEqual(before);
+    const start = s.pos;
+    for (let i = 0; i < 5; i++) s = act(s, mv("up"));
+    // It trails him by three steps, on the road he came along, facing the way he went.
+    expect(s.horse?.at).toEqual({ x: start.x, y: start.y - 2 });
     expect(s.horse?.face).toBe("up");
     let kicks = 0;
     for (let seed = 1; seed < 80; seed++) {
