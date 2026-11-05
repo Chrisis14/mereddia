@@ -154,7 +154,7 @@ export const NODES: Record<string, Node> = {
   },
   lost_no: say("narrator", "You decide against wandering the path. Better safe than sorry."),
   golem_nope: say("narrator", "The golem's hide is solid rock. Your fists would break long before it does. There must be a tool somewhere in this hollow."),
-  golem_down: say("narrator", "One swing. The pickaxe finds the seam in the stone and the golem comes apart like a dropped plate. Something glints in the rubble: an iron key.", undefined, { fx: "golemDown" }),
+  golem_down: say("narrator", "One swing. The pickaxe finds the seam in the stone and the golem comes apart like a dropped plate. Something glints in the rubble: a key.", undefined, { fx: "golemDown" }),
 
   // ------------------------------------------------------------------ the valley
   drawf1: {
